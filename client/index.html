@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kolizéum — v0.1 — Grille tactique & ligne de vue</title>
+<style>
+  :root {
+    --bg: #14171d;
+    --panel: #1c2029;
+    --panel-2: #232833;
+    --line: #333a47;
+    --text: #dfe4ec;
+    --muted: #8f9aad;
+    --accent: #5aa9e6;
+    --ok: #4cc38a;
+    --ko: #e5484d;
+    --warn: #f5a524;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* ---------- Sidebar ---------- */
+  #sidebar {
+    width: 292px;
+    flex: 0 0 292px;
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+    padding: 14px;
+    overflow-y: auto;
+  }
+  h1 { font-size: 15px; margin: 0 0 2px; letter-spacing: .2px; }
+  h1 span { color: var(--muted); font-weight: 400; font-size: 12px; }
+  h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--muted); margin: 18px 0 8px; padding-bottom: 5px;
+    border-bottom: 1px solid var(--line);
+  }
+  .row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+  .row label { flex: 1 1 auto; color: var(--muted); }
+  .row input[type=number], .row input[type=text], .row select {
+    width: 84px; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; font: inherit;
+  }
+  .row input[type=range] { width: 118px; accent-color: var(--accent); }
+  .check { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; cursor: pointer; }
+  .check input { accent-color: var(--accent); margin: 0; }
+  button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 5px; padding: 6px 10px; font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: #fff; }
+  button.primary { background: #24486a; border-color: #2f6595; }
+  .btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; flex: 1; padding: 6px 4px; }
+  .seg button.on { background: #24486a; color: #fff; }
+  .hint { color: var(--muted); font-size: 11.5px; margin: 6px 0 0; }
+  kbd {
+    background: var(--panel-2); border: 1px solid var(--line); border-bottom-width: 2px;
+    border-radius: 3px; padding: 0 4px; font: 11px ui-monospace, monospace;
+  }
+  textarea {
+    width: 100%; height: 74px; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 4px; padding: 6px;
+    font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical;
+  }
+  .legend { display: grid; grid-template-columns: 14px 1fr; gap: 5px 8px; align-items: center; color: var(--muted); }
+  .sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #0006; }
+
+  /* ---------- Main ---------- */
+  #main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+  #stage { flex: 1 1 auto; overflow: auto; padding: 16px; }
+  canvas { display: block; cursor: crosshair; }
+  #info {
+    flex: 0 0 auto; border-top: 1px solid var(--line); background: var(--panel);
+    padding: 9px 14px; display: flex; gap: 26px; flex-wrap: wrap;
+    font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  #info .k { color: var(--muted); }
+  #info .v { color: var(--text); }
+  .ok { color: var(--ok); }
+  .ko { color: var(--ko); }
+  .warn { color: var(--warn); }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h1>Kolizéum <span>— v0.1</span></h1>
+  <p class="hint">Grille tactique isométrique, obstacles, distance et ligne de vue (LDV).</p>
+
+  <h2>Carte</h2>
+  <div class="row">
+    <label for="mapW">Largeur (cellules/rangée)</label>
+    <input type="number" id="mapW" min="3" max="40" value="14">
+  </div>
+  <div class="row">
+    <label for="mapH">Hauteur (rangées doubles)</label>
+    <input type="number" id="mapH" min="3" max="40" value="20">
+  </div>
+  <div class="row">
+    <label for="density">Densité d'obstacles</label>
+    <input type="range" id="density" min="0" max="45" value="14">
+  </div>
+  <div class="row">
+    <label for="seed">Graine</label>
+    <input type="text" id="seed" value="1">
+  </div>
+  <div class="btn-row">
+    <button class="primary" id="btnGen">Régénérer</button>
+    <button id="btnRandSeed">Graine aléatoire</button>
+    <button id="btnClear">Vider</button>
+  </div>
+  <p class="hint" id="mapInfo"></p>
+
+  <h2>Mode</h2>
+  <div class="seg" id="modeSeg">
+    <button data-mode="inspect" class="on">Inspection (LDV)</button>
+    <button data-mode="edit">Édition</button>
+  </div>
+  <div id="editTools" style="display:none; margin-top:8px;">
+    <div class="seg" id="brushSeg">
+      <button data-brush="wall" class="on">Obstacle</button>
+      <button data-brush="hole">Trou</button>
+      <button data-brush="free">Libre</button>
+    </div>
+    <p class="hint">Clic gauche : appliquer le pinceau (glisser pour peindre).<br>Clic droit : rendre la cellule libre.</p>
+  </div>
+  <div id="inspectHelp">
+    <p class="hint">Clic gauche : placer <b>A</b> (source).<br>Clic droit : placer <b>B</b> (cible).<br>Le survol trace une LDV de prévisualisation depuis A.</p>
+  </div>
+
+  <h2>Ligne de vue</h2>
+  <label class="check"><input type="checkbox" id="optStrict" checked><span>Cellules « à moitié traversées » bloquantes <i class="hint">(règle Ankama)</i></span></label>
+  <label class="check"><input type="checkbox" id="optShowPath" checked><span>Surligner les cellules traversées</span></label>
+  <label class="check"><input type="checkbox" id="optShowRay" checked><span>Tracer le rayon centre-à-centre</span></label>
+
+  <h2>Affichage</h2>
+  <div class="row">
+    <label for="cellW">Taille des cellules</label>
+    <input type="range" id="cellW" min="18" max="96" value="40">
+  </div>
+  <div class="seg" id="labelSeg">
+    <button data-label="none">Rien</button>
+    <button data-label="id" class="on">ID</button>
+    <button data-label="xy">x,y</button>
+  </div>
+
+  <h2>Légende</h2>
+  <div class="legend">
+    <span class="sw" style="background:#2b313d"></span><span>Cellule libre</span>
+    <span class="sw" style="background:#59616f"></span><span>Obstacle (bloque LDV + déplacement)</span>
+    <span class="sw" style="background:#0d0f14"></span><span>Trou (bloque le déplacement seul)</span>
+    <span class="sw" style="background:#4cc38a"></span><span>A — source</span>
+    <span class="sw" style="background:#e5484d"></span><span>B — cible</span>
+    <span class="sw" style="background:#3a6ea5"></span><span>Zones de départ</span>
+  </div>
+
+  <h2>Sauvegarde</h2>
+  <div class="btn-row">
+    <button id="btnExport">Exporter</button>
+    <button id="btnImport">Importer</button>
+  </div>
+  <textarea id="io" spellcheck="false" placeholder="JSON de la carte (export / import)"></textarea>
+
+  <h2>Raccourcis</h2>
+  <p class="hint">
+    <kbd>E</kbd> mode édition · <kbd>R</kbd> régénérer · <kbd>L</kbd> règle des cellules à moitié traversées · <kbd>C</kbd> étiquettes
+  </p>
+</div>
+
+<div id="main">
+  <div id="stage"><canvas id="cv"></canvas></div>
+  <div id="info">
+    <span><span class="k">A</span> <span class="v" id="iA">—</span></span>
+    <span><span class="k">B</span> <span class="v" id="iB">—</span></span>
+    <span><span class="k">distance</span> <span class="v" id="iDist">—</span></span>
+    <span><span class="k">LDV</span> <span class="v" id="iLos">—</span></span>
+    <span><span class="k">traversées</span> <span class="v" id="iCells">—</span></span>
+    <span><span class="k">bloqueurs</span> <span class="v" id="iBlock">—</span></span>
+    <span><span class="k">survol</span> <span class="v" id="iHover">—</span></span>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ==========================================================================
+   1. GÉOMÉTRIE DE LA GRILLE
+   --------------------------------------------------------------------------
+   Dofus n'utilise pas une grille hexagonale mais une grille isométrique en
+   losanges : un réseau carré tourné à 45°. On travaille donc dans un repère
+   « diamant » (x, y) où chaque cellule est un carré unité centré sur des
+   coordonnées entières — ce qui rend la LDV et les distances exactes et
+   simples à raisonner.
+
+     - écran :  sx = (x - y) * hw        (hw = demi-largeur d'une cellule)
+                sy = (x + y) * hh        (hh = demi-hauteur d'une cellule)
+     - voisins : (x±1, y) et (x, y±1)  → les 4 losanges adjacents à l'écran
+     - distance Dofus : |Δx| + |Δy|     (distance de Manhattan dans ce repère)
+
+   Numérotation des cellules (identique à Dofus) : W cellules par rangée
+   écran, 2H rangées écran décalées d'une demi-cellule, ids croissants de
+   gauche à droite puis de haut en bas. Total = W * H * 2 (560 pour 14 × 20).
+   ========================================================================== */
+
+function makeGrid(W, H) {
+  const rows = H * 2;
+  return {
+    W, H, rows,
+    size: W * rows,
+
+    idToCoord(id) {
+      const r = (id / W) | 0, c = id % W, k = r >> 1;
+      return { x: k + c + (r & 1), y: k - c };
+    },
+    coordToId(x, y) {
+      const r = x + y;
+      if (r < 0 || r >= rows) return -1;
+      const k = r >> 1, c = x - k - (r & 1);
+      if (c < 0 || c >= W) return -1;
+      return r * W + c;
+    },
+    /** Rangée écran (0 .. rows-1) et colonne dans la rangée (0 .. W-1). */
+    idToRC(id) { return { r: (id / W) | 0, c: id % W }; },
+  };
+}
+
+/** Distance Dofus entre deux cellules (Manhattan dans le repère diamant). */
+function cellDistance(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); }
+
+
+/* ==========================================================================
+   2. LIGNE DE VUE (LDV)
+   --------------------------------------------------------------------------
+   Algorithme : on trace un segment entre les CENTRES des deux cellules, puis
+   on collecte toutes les cellules dont le carré unité FERMÉ est intersecté
+   par ce segment (« supercover »). Une cellule seulement effleurée — le
+   segment passant pile par un de ses coins — compte donc comme traversée :
+   c'est la subtilité Ankama des cellules « à moitié traversées », qui
+   bloquent la LDV si elles contiennent un obstacle.
+
+   Les cellules de départ et d'arrivée ne bloquent jamais : la cible ne se
+   masque pas elle-même, et l'on voit depuis sa propre case.
+
+   Arithmétique exacte : les extrémités sont entières et les bords de cellule
+   sont sur des demi-entiers. On double toutes les coordonnées pour rester
+   dans les entiers, et les instants t sont comparés sous forme de fractions
+   (produits en croix). Aucun epsilon, donc aucune ambiguïté sur les cas
+   limites — précisément ceux qui définissent la règle.
+   ========================================================================== */
+
+/** Compare deux fractions n/d (d > 0). */
+function cmpFrac(a, b) {
+  const v = a.n * b.d - b.n * a.d;
+  return v < 0 ? -1 : v > 0 ? 1 : 0;
+}
+
+/**
+ * Intervalle de t pour lequel C0 + D·t reste dans la tranche fermée [B0, B1].
+ * Retourne { lo, hi } (fractions) ou null si la tranche n'est jamais atteinte.
+ */
+function slabInterval(C0, D, B0, B1) {
+  if (D === 0) {
+    return (C0 >= B0 && C0 <= B1) ? { lo: { n: 0, d: 1 }, hi: { n: 1, d: 1 } } : null;
+  }
+  let t0, t1;
+  if (D > 0) { t0 = { n: B0 - C0, d: D }; t1 = { n: B1 - C0, d: D }; }
+  else       { t0 = { n: C0 - B0, d: -D }; t1 = { n: C0 - B1, d: -D }; }
+  return cmpFrac(t0, t1) <= 0 ? { lo: t0, hi: t1 } : { lo: t1, hi: t0 };
+}
+
+/**
+ * Intervalle { lo, hi } des instants passés par le segment (x0,y0)→(x1,y1)
+ * dans la cellule (i,j), ou null si le segment ne la touche pas.
+ * strict = true  : le simple effleurement d'un coin compte comme traversée
+ *                  (lo == hi, cellule « à moitié traversée »).
+ * strict = false : il faut traverser l'intérieur de la cellule (lo < hi).
+ */
+function segmentEntersCell(x0, y0, x1, y1, i, j, strict) {
+  const Cx = 2 * x0, Dx = 2 * (x1 - x0);
+  const Cy = 2 * y0, Dy = 2 * (y1 - y0);
+
+  const sx = slabInterval(Cx, Dx, 2 * i - 1, 2 * i + 1); if (!sx) return null;
+  const sy = slabInterval(Cy, Dy, 2 * j - 1, 2 * j + 1); if (!sy) return null;
+
+  let lo = { n: 0, d: 1 }, hi = { n: 1, d: 1 };
+  if (cmpFrac(sx.lo, lo) > 0) lo = sx.lo;
+  if (cmpFrac(sy.lo, lo) > 0) lo = sy.lo;
+  if (cmpFrac(sx.hi, hi) < 0) hi = sx.hi;
+  if (cmpFrac(sy.hi, hi) < 0) hi = sy.hi;
+
+  const c = cmpFrac(lo, hi);
+  if (strict ? c > 0 : c >= 0) return null;
+  return { lo, hi };
+}
+
+/**
+ * Toutes les cellules traversées par le segment A→B, dans l'ordre du parcours
+ * (extrémités incluses). Chaque entrée : { x, y, id, t, tOut }.
+ *
+ * Sur une diagonale parfaite, le rayon passe pile par les coins : la cellule
+ * réellement traversée et ses deux voisines « à moitié traversées » entrent
+ * au même instant. On départage par l'instant de sortie croissant : les
+ * cellules effleurées (durée nulle) précèdent la cellule traversée, si bien
+ * que la source reste en tête et la cible en queue de liste.
+ */
+function traversedCells(grid, a, b, strict) {
+  const out = [];
+  const xMin = Math.min(a.x, b.x), xMax = Math.max(a.x, b.x);
+  const yMin = Math.min(a.y, b.y), yMax = Math.max(a.y, b.y);
+
+  for (let i = xMin; i <= xMax; i++) {
+    for (let j = yMin; j <= yMax; j++) {
+      const span = segmentEntersCell(a.x, a.y, b.x, b.y, i, j, strict);
+      if (!span) continue;
+      out.push({
+        x: i, y: j, id: grid.coordToId(i, j),
+        t: span.lo.n / span.lo.d,
+        tOut: span.hi.n / span.hi.d,
+      });
+    }
+  }
+  out.sort((p, q) => (p.t - q.t) || (p.tOut - q.tOut));
+  return out;
+}
+
+/**
+ * Résout la LDV entre deux cellules.
+ * @returns { clear, cells, blockers }
+ */
+function lineOfSight(grid, map, aId, bId, strict) {
+  const a = grid.idToCoord(aId), b = grid.idToCoord(bId);
+  const cells = traversedCells(grid, a, b, strict);
+  const blockers = [];
+  for (const c of cells) {
+    if (c.id === aId || c.id === bId) continue;   // extrémités jamais bloquantes
+    // Une cellule hors grille n'est jamais un obstacle : un rayon reliant deux
+    // cellules valides ne peut que l'effleurer en bordure (vérifié pour toutes
+    // les paires sur plusieurs tailles de grille), jamais la traverser. La
+    // compter comme bloquante couperait la LDV le long des rangées de bord.
+    if (c.id < 0) continue;
+    if (map.blocksLos(c.id)) blockers.push(c);
+  }
+  return { clear: blockers.length === 0, cells, blockers };
+}
+
+
+/* ==========================================================================
+   3. ÉTAT DE LA CARTE
+   ========================================================================== */
+
+const CELL_FREE = 0;   // libre
+const CELL_WALL = 1;   // obstacle : bloque la LDV et le déplacement
+const CELL_HOLE = 2;   // trou : bloque le déplacement, laisse passer la LDV
+
+function makeMap(grid) {
+  return {
+    grid,
+    cells: new Uint8Array(grid.size),
+    startA: new Set(),
+    startB: new Set(),
+    blocksLos(id) { return this.cells[id] === CELL_WALL; },
+    walkable(id) { return this.cells[id] === CELL_FREE; },
+  };
+}
+
+/** Générateur pseudo-aléatoire déterministe (mulberry32) : cartes reproductibles. */
+function makeRng(seed) {
+  let s = seed >>> 0;
+  return function () {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Hache une graine textuelle en entier 32 bits. */
+function hashSeed(str) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h || 1;
+}
+
+/** Cellules voisines franchissables (4 directions dans le repère diamant). */
+function neighbors(grid, id) {
+  const { x, y } = grid.idToCoord(id);
+  const out = [];
+  const cand = [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]];
+  for (const [nx, ny] of cand) {
+    const nid = grid.coordToId(nx, ny);
+    if (nid >= 0) out.push(nid);
+  }
+  return out;
+}
+
+/**
+ * Génère une carte : obstacles aléatoires (par amas, plus lisibles que du
+ * bruit pur), zones de départ opposées dégagées, et connectivité garantie
+ * entre les deux zones.
+ */
+function generateMap(grid, seedStr, densityPct) {
+  const map = makeMap(grid);
+  const rng = makeRng(hashSeed(String(seedStr)));
+  const density = densityPct / 100;
+
+  // --- Zones de départ : deux colonnes à chaque extrémité, tiers médian ---
+  const rowLo = Math.floor(grid.rows / 3), rowHi = Math.ceil(grid.rows * 2 / 3);
+  const zoneW = Math.min(2, Math.max(1, Math.floor(grid.W / 4)));
+  for (let r = rowLo; r < rowHi; r++) {
+    for (let c = 0; c < zoneW; c++) {
+      map.startA.add(r * grid.W + c);
+      map.startB.add(r * grid.W + (grid.W - 1 - c));
+    }
+  }
+
+  // --- Obstacles : amas de 1 à 4 cellules ---
+  const target = Math.floor(grid.size * density);
+  let placed = 0, guard = 0;
+  while (placed < target && guard++ < grid.size * 20) {
+    let id = Math.floor(rng() * grid.size);
+    const clump = 1 + Math.floor(rng() * 4);
+    for (let k = 0; k < clump && placed < target; k++) {
+      if (map.cells[id] === CELL_FREE && !map.startA.has(id) && !map.startB.has(id)) {
+        map.cells[id] = rng() < 0.12 ? CELL_HOLE : CELL_WALL;
+        placed++;
+      }
+      const nb = neighbors(grid, id);
+      if (!nb.length) break;
+      id = nb[Math.floor(rng() * nb.length)];
+    }
+  }
+
+  // --- Zones de départ toujours dégagées ---
+  for (const id of map.startA) map.cells[id] = CELL_FREE;
+  for (const id of map.startB) map.cells[id] = CELL_FREE;
+
+  carveConnection(grid, map);
+  return map;
+}
+
+/**
+ * Garantit qu'un chemin franchissable relie les deux zones de départ.
+ * Dijkstra où franchir un obstacle coûte cher : on suit le chemin le moins
+ * coûteux et on dégage les obstacles rencontrés (au minimum).
+ */
+function carveConnection(grid, map) {
+  const from = [...map.startA][Math.floor(map.startA.size / 2)];
+  const goal = new Set(map.startB);
+  const INF = Infinity;
+  const dist = new Float64Array(grid.size).fill(INF);
+  const prev = new Int32Array(grid.size).fill(-1);
+  const seen = new Uint8Array(grid.size);
+  dist[from] = 0;
+
+  // File de priorité simpliste : suffisante pour quelques centaines de cellules.
+  const queue = [from];
+  let target = -1;
+  while (queue.length) {
+    let bi = 0;
+    for (let i = 1; i < queue.length; i++) if (dist[queue[i]] < dist[queue[bi]]) bi = i;
+    const cur = queue.splice(bi, 1)[0];
+    if (seen[cur]) continue;
+    seen[cur] = 1;
+    if (goal.has(cur)) { target = cur; break; }
+    for (const nb of neighbors(grid, cur)) {
+      if (seen[nb]) continue;
+      const cost = map.cells[nb] === CELL_FREE ? 1 : 60;
+      if (dist[cur] + cost < dist[nb]) {
+        dist[nb] = dist[cur] + cost;
+        prev[nb] = cur;
+        queue.push(nb);
+      }
+    }
+  }
+  if (target < 0) return;
+  for (let id = target; id !== -1; id = prev[id]) map.cells[id] = CELL_FREE;
+}
+
+
+/* ==========================================================================
+   4. RENDU CANVAS
+   ========================================================================== */
+
+const COLORS = {
+  freeA: "#2b313d",
+  freeB: "#262c37",
+  wallTop: "#59616f",
+  wallSide: "#3c434f",
+  hole: "#0d0f14",
+  edge: "#1a1e26",
+  startA: "#2f5d8a",
+  startB: "#2f5d8a",
+  a: "#4cc38a",
+  b: "#e5484d",
+  ray: "#8bd3ff",
+  rayKo: "#e5484d",
+  path: "rgba(139, 211, 255, 0.16)",
+  blocker: "rgba(229, 72, 77, 0.45)",
+  hover: "rgba(255,255,255,0.14)",
+  label: "#7a8497",
+};
+
+function makeRenderer(canvas) {
+  const ctx = canvas.getContext("2d");
+  const state = { hw: 26, hh: 13, dpr: 1 };
+
+  function layout(grid, cellWidth) {
+    state.hw = cellWidth / 2;
+    state.hh = cellWidth / 4;          // ratio isométrique 2:1, comme Dofus
+    const w = (2 * grid.W + 1) * state.hw;
+    const h = (2 * grid.rows + 1) * state.hh;
+    state.dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.ceil(w * state.dpr);
+    canvas.height = Math.ceil(h * state.dpr);
+    canvas.style.width = w + "px";
+    canvas.style.height = h + "px";
+  }
+
+  /** Centre écran (px CSS) d'une cellule. */
+  function center(c) {
+    return { px: (c.x - c.y) * state.hw + state.hw, py: (c.x + c.y) * state.hh + state.hh };
+  }
+
+  /** Cellule sous un point écran (px CSS) — l'inverse exact de center(). */
+  function pick(grid, px, py) {
+    const u = (px - state.hw) / state.hw;   // u = x - y
+    const v = (py - state.hh) / state.hh;   // v = x + y
+    const x = Math.round((u + v) / 2);
+    const y = Math.round((v - u) / 2);
+    return grid.coordToId(x, y);
+  }
+
+  function diamond(px, py, inset) {
+    const hw = state.hw - inset, hh = state.hh - inset * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(px, py - hh);
+    ctx.lineTo(px + hw, py);
+    ctx.lineTo(px, py + hh);
+    ctx.lineTo(px - hw, py);
+    ctx.closePath();
+  }
+
+  function fillCell(c, color, inset) {
+    const { px, py } = center(c);
+    diamond(px, py, inset === undefined ? 0.5 : inset);
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+
+  function draw(view) {
+    const { grid, map, opts } = view;
+    ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // --- Cellules ---
+    for (let id = 0; id < grid.size; id++) {
+      const c = grid.idToCoord(id);
+      const { r, c: col } = grid.idToRC(id);
+      const kind = map.cells[id];
+      let color;
+      if (kind === CELL_HOLE) color = COLORS.hole;
+      else if (kind === CELL_WALL) color = COLORS.wallTop;
+      else if (map.startA.has(id) || map.startB.has(id)) color = COLORS.startA;
+      else color = ((r + col) & 1) ? COLORS.freeA : COLORS.freeB;
+
+      const { px, py } = center(c);
+      diamond(px, py, 0.5);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = COLORS.edge;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      if (kind === CELL_WALL) {                     // petit relief pour les obstacles
+        diamond(px, py - state.hh * 0.35, state.hw * 0.28);
+        ctx.fillStyle = COLORS.wallSide;
+        ctx.fill();
+      }
+    }
+
+    // --- Cellules traversées / bloqueurs ---
+    if (view.los && opts.showPath) {
+      for (const c of view.los.cells) if (c.id >= 0) fillCell(c, COLORS.path, 1.5);
+      for (const c of view.los.blockers) if (c.id >= 0) fillCell(c, COLORS.blocker, 1.5);
+    }
+
+    // --- Survol ---
+    if (view.hoverId >= 0) fillCell(grid.idToCoord(view.hoverId), COLORS.hover, 1);
+
+    // --- Étiquettes ---
+    const minHw = opts.labels === "xy" ? 22 : 14;   // « x,y » demande plus de place que l'id
+    if (opts.labels !== "none" && state.hw >= minHw) {
+      ctx.font = `${Math.max(8, Math.round(state.hw * 0.34))}px ui-monospace, monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = COLORS.label;
+      for (let id = 0; id < grid.size; id++) {
+        if (map.cells[id] !== CELL_FREE) continue;
+        const c = grid.idToCoord(id);
+        const { px, py } = center(c);
+        ctx.fillText(opts.labels === "id" ? String(id) : `${c.x},${c.y}`, px, py);
+      }
+    }
+
+    // --- Rayon de prévisualisation (survol) ---
+    if (view.preview && opts.showRay) {
+      const p0 = center(grid.idToCoord(view.preview.from));
+      const p1 = center(grid.idToCoord(view.preview.to));
+      ctx.save();
+      ctx.setLineDash([4, 4]);
+      ctx.globalAlpha = 0.55;
+      ctx.strokeStyle = view.preview.clear ? COLORS.ray : COLORS.rayKo;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(p0.px, p0.py);
+      ctx.lineTo(p1.px, p1.py);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // --- Marqueurs A / B et rayon principal ---
+    if (view.aId >= 0) marker(grid.idToCoord(view.aId), COLORS.a, "A");
+    if (view.bId >= 0) marker(grid.idToCoord(view.bId), COLORS.b, "B");
+
+    if (view.los && view.aId >= 0 && view.bId >= 0 && opts.showRay) {
+      const p0 = center(grid.idToCoord(view.aId));
+      const p1 = center(grid.idToCoord(view.bId));
+      ctx.strokeStyle = view.los.clear ? COLORS.ray : COLORS.rayKo;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(p0.px, p0.py);
+      ctx.lineTo(p1.px, p1.py);
+      ctx.stroke();
+      for (const p of [p0, p1]) {
+        ctx.beginPath();
+        ctx.arc(p.px, p.py, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = view.los.clear ? COLORS.ray : COLORS.rayKo;
+        ctx.fill();
+      }
+    }
+  }
+
+  function marker(c, color, letter) {
+    const { px, py } = center(c);
+    diamond(px, py, 2);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.85;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#0b0d11";
+    ctx.font = `bold ${Math.max(9, Math.round(state.hw * 0.5))}px ui-sans-serif, system-ui`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(letter, px, py);
+  }
+
+  return { layout, draw, pick, center, state };
+}
+
+
+/* ==========================================================================
+   5. APPLICATION
+   ========================================================================== */
+
+const $ = (id) => document.getElementById(id);
+
+const app = {
+  grid: null,
+  map: null,
+  aId: -1,
+  bId: -1,
+  hoverId: -1,
+  mode: "inspect",
+  brush: CELL_WALL,
+  painting: 0,          // 0 = non, 1 = pinceau, 2 = effacement
+  opts: { strict: true, showPath: true, showRay: true, labels: "id", cellWidth: 40 },
+};
+
+const renderer = makeRenderer($("cv"));
+
+function regenerate() {
+  const W = clampInt($("mapW").value, 3, 40, 14);
+  const H = clampInt($("mapH").value, 3, 40, 20);
+  app.grid = makeGrid(W, H);
+  app.map = generateMap(app.grid, $("seed").value, Number($("density").value));
+
+  // A et B au centre des zones de départ opposées.
+  const zoneA = [...app.map.startA], zoneB = [...app.map.startB];
+  app.aId = zoneA[Math.floor(zoneA.length / 2)];
+  app.bId = zoneB[Math.floor(zoneB.length / 2)];
+  app.hoverId = -1;
+  relayout();
+}
+
+function clampInt(v, lo, hi, dflt) {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt;
+}
+
+function relayout() {
+  renderer.layout(app.grid, app.opts.cellWidth);
+  render();
+}
+
+function render() {
+  const g = app.grid;
+  const los = (app.aId >= 0 && app.bId >= 0)
+    ? lineOfSight(g, app.map, app.aId, app.bId, app.opts.strict)
+    : null;
+
+  let preview = null;
+  if (app.mode === "inspect" && app.hoverId >= 0 && app.aId >= 0 && app.hoverId !== app.aId && app.hoverId !== app.bId) {
+    const p = lineOfSight(g, app.map, app.aId, app.hoverId, app.opts.strict);
+    preview = { from: app.aId, to: app.hoverId, clear: p.clear };
+  }
+
+  renderer.draw({ grid: g, map: app.map, opts: app.opts, aId: app.aId, bId: app.bId, hoverId: app.hoverId, los, preview });
+  updateInfo(los);
+}
+
+function fmtCell(id) {
+  if (id < 0) return "—";
+  const c = app.grid.idToCoord(id);
+  return `#${id} (${c.x},${c.y})`;
+}
+
+function updateInfo(los) {
+  $("iA").textContent = fmtCell(app.aId);
+  $("iB").textContent = fmtCell(app.bId);
+  $("iHover").textContent = fmtCell(app.hoverId);
+  $("mapInfo").textContent = `${app.grid.W} × ${app.grid.rows} rangées — ${app.grid.size} cellules`;
+
+  if (!los) {
+    $("iDist").textContent = "—";
+    $("iLos").textContent = "—";
+    $("iCells").textContent = "—";
+    $("iBlock").textContent = "—";
+    return;
+  }
+  const a = app.grid.idToCoord(app.aId), b = app.grid.idToCoord(app.bId);
+  $("iDist").textContent = String(cellDistance(a, b));
+  const el = $("iLos");
+  el.textContent = los.clear ? "dégagée" : "bloquée";
+  el.className = "v " + (los.clear ? "ok" : "ko");
+  $("iCells").textContent = los.cells.map((c) => (c.id >= 0 ? c.id : "×")).join(" → ");
+  $("iBlock").textContent = los.blockers.length ? los.blockers.map((c) => c.id).join(", ") : "aucun";
+}
+
+/* ---------- Souris ---------- */
+
+function cellAt(ev) {
+  const rect = $("cv").getBoundingClientRect();
+  return renderer.pick(app.grid, ev.clientX - rect.left, ev.clientY - rect.top);
+}
+
+function paint(id, erase) {
+  if (id < 0) return;
+  if (app.map.startA.has(id) || app.map.startB.has(id)) return;   // zones de départ protégées
+  const next = erase ? CELL_FREE : app.brush;
+  if (app.map.cells[id] === next) return;
+  app.map.cells[id] = next;
+  render();
+}
+
+const cv = $("cv");
+
+cv.addEventListener("contextmenu", (e) => e.preventDefault());
+
+cv.addEventListener("mousedown", (ev) => {
+  const id = cellAt(ev);
+  if (id < 0) return;
+  if (app.mode === "edit") {
+    app.painting = ev.button === 2 ? 2 : 1;
+    paint(id, app.painting === 2);
+  } else {
+    if (ev.button === 2) app.bId = id;
+    else app.aId = id;
+    render();
+  }
+});
+
+window.addEventListener("mouseup", () => { app.painting = 0; });
+
+cv.addEventListener("mousemove", (ev) => {
+  const id = cellAt(ev);
+  if (app.painting) { paint(id, app.painting === 2); return; }
+  if (id !== app.hoverId) { app.hoverId = id; render(); }
+});
+
+cv.addEventListener("mouseleave", () => {
+  if (app.hoverId !== -1) { app.hoverId = -1; render(); }
+});
+
+/* ---------- Contrôles ---------- */
+
+$("btnGen").addEventListener("click", regenerate);
+$("btnRandSeed").addEventListener("click", () => {
+  $("seed").value = String(Math.floor(Math.random() * 1e6));
+  regenerate();
+});
+$("btnClear").addEventListener("click", () => {
+  app.map.cells.fill(CELL_FREE);
+  render();
+});
+
+for (const el of [$("mapW"), $("mapH")]) el.addEventListener("change", regenerate);
+$("density").addEventListener("change", regenerate);
+$("seed").addEventListener("change", regenerate);
+
+$("cellW").addEventListener("input", (e) => {
+  app.opts.cellWidth = Number(e.target.value);
+  relayout();
+});
+
+$("optStrict").addEventListener("change", (e) => { app.opts.strict = e.target.checked; render(); });
+$("optShowPath").addEventListener("change", (e) => { app.opts.showPath = e.target.checked; render(); });
+$("optShowRay").addEventListener("change", (e) => { app.opts.showRay = e.target.checked; render(); });
+
+function segment(containerId, attr, onPick) {
+  const box = $(containerId);
+  box.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button");
+    if (!btn) return;
+    for (const b of box.querySelectorAll("button")) b.classList.toggle("on", b === btn);
+    onPick(btn.dataset[attr]);
+  });
+}
+
+segment("modeSeg", "mode", (m) => {
+  app.mode = m;
+  $("editTools").style.display = m === "edit" ? "" : "none";
+  $("inspectHelp").style.display = m === "edit" ? "none" : "";
+  render();
+});
+segment("brushSeg", "brush", (b) => {
+  app.brush = b === "wall" ? CELL_WALL : b === "hole" ? CELL_HOLE : CELL_FREE;
+});
+segment("labelSeg", "label", (l) => { app.opts.labels = l; render(); });
+
+/* ---------- Import / export ---------- */
+
+$("btnExport").addEventListener("click", () => {
+  const walls = [], holes = [];
+  for (let id = 0; id < app.grid.size; id++) {
+    if (app.map.cells[id] === CELL_WALL) walls.push(id);
+    else if (app.map.cells[id] === CELL_HOLE) holes.push(id);
+  }
+  $("io").value = JSON.stringify({
+    v: 1, W: app.grid.W, H: app.grid.H, walls, holes, a: app.aId, b: app.bId,
+  });
+});
+
+$("btnImport").addEventListener("click", () => {
+  let data;
+  try { data = JSON.parse($("io").value); }
+  catch (e) { alert("JSON invalide : " + e.message); return; }
+  try {
+    app.grid = makeGrid(data.W, data.H);
+    app.map = makeMap(app.grid);
+    for (const id of data.walls || []) if (id >= 0 && id < app.grid.size) app.map.cells[id] = CELL_WALL;
+    for (const id of data.holes || []) if (id >= 0 && id < app.grid.size) app.map.cells[id] = CELL_HOLE;
+    app.aId = Number.isInteger(data.a) ? data.a : -1;
+    app.bId = Number.isInteger(data.b) ? data.b : -1;
+    $("mapW").value = data.W;
+    $("mapH").value = data.H;
+    relayout();
+  } catch (e) {
+    alert("Carte illisible : " + e.message);
+  }
+});
+
+/* ---------- Clavier ---------- */
+
+window.addEventListener("keydown", (ev) => {
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName)) return;
+  const k = ev.key.toLowerCase();
+  if (k === "e") {
+    const next = app.mode === "edit" ? "inspect" : "edit";
+    $("modeSeg").querySelector(`[data-mode="${next}"]`).click();
+  } else if (k === "r") {
+    regenerate();
+  } else if (k === "l") {
+    $("optStrict").checked = !$("optStrict").checked;
+    $("optStrict").dispatchEvent(new Event("change"));
+  } else if (k === "c") {
+    const order = ["none", "id", "xy"];
+    const cur = order.indexOf(app.opts.labels);
+    $("labelSeg").querySelector(`[data-label="${order[(cur + 1) % 3]}"]`).click();
+  }
+});
+
+
+/* ==========================================================================
+   6. AUTO-TESTS
+   --------------------------------------------------------------------------
+   Vérifications de cohérence exécutées au chargement (résultats en console).
+   Elles ne valident pas la fidélité au jeu — c'est le rôle de la comparaison
+   visuelle — mais garantissent l'absence de régression sur les invariants.
+   ========================================================================== */
+
+function selfTest() {
+  const g = makeGrid(14, 20);
+  const fails = [];
+  const check = (cond, msg) => { if (!cond) fails.push(msg); };
+
+  // Aller-retour id ↔ (x, y) sur toute la grille.
+  for (let id = 0; id < g.size; id++) {
+    const c = g.idToCoord(id);
+    check(g.coordToId(c.x, c.y) === id, `aller-retour id ${id}`);
+  }
+
+  // Les 4 voisins d'une cellule intérieure sont à distance 1.
+  const mid = g.coordToId(10, 5);
+  check(neighbors(g, mid).length === 4, "4 voisins attendus");
+  for (const nb of neighbors(g, mid)) {
+    check(cellDistance(g.idToCoord(mid), g.idToCoord(nb)) === 1, "voisin à distance 1");
+  }
+
+  const m = makeMap(g);
+  const idOf = (x, y) => g.coordToId(x, y);
+
+  // Ligne droite dégagée.
+  check(lineOfSight(g, m, idOf(5, 5), idOf(9, 5), true).clear, "ligne droite dégagée");
+
+  // Un obstacle sur la ligne bloque.
+  m.cells[idOf(7, 5)] = CELL_WALL;
+  check(!lineOfSight(g, m, idOf(5, 5), idOf(9, 5), true).clear, "obstacle bloquant");
+
+  // Un trou ne bloque pas la LDV.
+  m.cells[idOf(7, 5)] = CELL_HOLE;
+  check(lineOfSight(g, m, idOf(5, 5), idOf(9, 5), true).clear, "trou transparent");
+  m.cells[idOf(7, 5)] = CELL_FREE;
+
+  // Un obstacle sur la cible ne bloque jamais la vue vers elle.
+  m.cells[idOf(9, 5)] = CELL_WALL;
+  check(lineOfSight(g, m, idOf(5, 5), idOf(9, 5), true).clear, "cible non bloquante");
+  m.cells[idOf(9, 5)] = CELL_FREE;
+
+  // Symétrie de la LDV.
+  m.cells[idOf(7, 6)] = CELL_WALL;
+  for (const [a, b] of [[idOf(5, 5), idOf(9, 7)], [idOf(4, 9), idOf(11, 3)]]) {
+    check(lineOfSight(g, m, a, b, true).clear === lineOfSight(g, m, b, a, true).clear, "LDV symétrique");
+  }
+  m.cells[idOf(7, 6)] = CELL_FREE;
+
+  // Cellules « à moitié traversées » : la diagonale (0,0)→(2,2) passe pile par
+  // les coins de (1,0) et (0,1). En mode strict, elles sont traversées et
+  // bloquent ; en mode permissif, elles sont ignorées.
+  const strictCells = traversedCells(g, { x: 5, y: 5 }, { x: 7, y: 7 }, true).map((c) => `${c.x},${c.y}`);
+  check(strictCells.includes("6,5") && strictCells.includes("5,6"), "coins comptés en mode strict");
+  const looseCells = traversedCells(g, { x: 5, y: 5 }, { x: 7, y: 7 }, false).map((c) => `${c.x},${c.y}`);
+  check(!looseCells.includes("6,5") && !looseCells.includes("5,6"), "coins ignorés en mode permissif");
+
+  m.cells[idOf(6, 5)] = CELL_WALL;
+  check(!lineOfSight(g, m, idOf(5, 5), idOf(7, 7), true).clear, "coin bloquant en strict");
+  check(lineOfSight(g, m, idOf(5, 5), idOf(7, 7), false).clear, "coin non bloquant en permissif");
+  m.cells[idOf(6, 5)] = CELL_FREE;
+
+  // Bordure de carte : deux cellules aux extrémités de la première rangée se
+  // voient, bien que le rayon effleure des cellules situées hors de la grille.
+  check(lineOfSight(g, m, 0, g.W - 1, true).clear, "LDV le long de la rangée du haut");
+  check(lineOfSight(g, m, g.size - g.W, g.size - 1, true).clear, "LDV le long de la rangée du bas");
+
+  // La cellule source et la cellule cible font toujours partie du parcours.
+  const path = traversedCells(g, { x: 3, y: 4 }, { x: 8, y: 9 }, true);
+  check(path[0].id === idOf(3, 4) && path[path.length - 1].id === idOf(8, 9), "parcours ordonné");
+
+  // Même sur une diagonale parfaite, où plusieurs cellules entrent au même
+  // instant, la source reste en tête et la cible en queue.
+  const diag = traversedCells(g, { x: 3, y: 3 }, { x: 7, y: 7 }, true);
+  check(diag[0].id === idOf(3, 3) && diag[diag.length - 1].id === idOf(7, 7), "diagonale ordonnée");
+
+  // Le parcours est continu : deux cellules consécutives sont adjacentes,
+  // sauf entre cellules entrant au même instant (coins d'une diagonale).
+  for (let i = 1; i < diag.length; i++) {
+    check(cellDistance(diag[i - 1], diag[i]) === 1 || diag[i - 1].t === diag[i].t, "parcours continu");
+  }
+
+  if (fails.length) console.error("Auto-tests KO :", fails);
+  else console.log(`Auto-tests OK (${g.size} cellules vérifiées).`);
+  return fails;
+}
+
+selfTest();
+regenerate();
+</script>
+</body>
+</html>
