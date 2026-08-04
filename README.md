@@ -46,6 +46,11 @@ téléphone.
 
 **Onglet Actions → « Extraire les équipements (DofusDB) » → Run workflow.**
 
+> ⚠️ Après une correction du code, il faut un **nouveau** run : le bouton
+> **« Re-run jobs »** d'un run existant rejoue le commit figé de ce run, donc la
+> version d'avant la correction. Le bouton **« Run workflow »** est le seul à
+> prendre la dernière version de la branche.
+
 Options du formulaire :
 
 | Entrée | Effet |
