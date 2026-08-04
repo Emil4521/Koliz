@@ -1,0 +1,14 @@
+{
+  "name": "kolizeum",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Clone jouable du système de combat tactique PvP 1v1 de Dofus (Kolizéum)",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node tests/run.js",
+    "data:sample": "node scripts/make_sample.js",
+    "data:fetch": "node scripts/fetch_items.js"
+  }
+}

@@ -7,7 +7,122 @@ Le brief complet du projet est archivé dans [`docs/brief.md`](docs/brief.md).
 
 ---
 
-## État actuel : version 0.1 — fondations géométriques
+## Démarrage rapide
+
+```bash
+node scripts/make_sample.js     # données d'exemple (fictives), sans réseau
+npm test                        # suite de tests, sans dépendance
+```
+
+Puis ouvrir directement dans un navigateur (aucun serveur nécessaire) :
+
+| Fichier | Version | Contenu |
+|---|---|---|
+| `client/index.html` | v0.1 | Grille tactique, distance, ligne de vue |
+| `client/equipment.html` | v0.2 | Catalogue d'équipement, jets, panoplies, statistiques |
+
+Pour les **données officielles** (nécessite un accès à `api.dofusdb.fr`) :
+
+```bash
+node scripts/fetch_items.js             # extraction complète
+node scripts/fetch_items.js --max 200   # échantillon rapide
+node scripts/fetch_items.js --help      # options
+```
+
+Le script écrit `client/data/items.json` et sa variante `items.data.js`, qui
+prend automatiquement le pas sur les données d'exemple au chargement de la page.
+
+> Tant que `fetch_items.js` n'a pas tourné, la console du navigateur signale un
+> `ERR_FILE_NOT_FOUND` sur `data/items.data.js` : c'est attendu, la page bascule
+> alors sur les données d'exemple et le bandeau orange le rappelle.
+
+---
+
+## Version 0.2 — équipements et interface d'équipement
+
+### Livrables
+
+| Fichier | Rôle |
+|---|---|
+| `scripts/fetch_items.js` | Extraction DofusDB → `items.json` (aucune dépendance, Node 18+) |
+| `scripts/make_sample.js` | Jeu de données fictif au format exact, pour travailler sans réseau |
+| `client/items.js` | Jets, emplacements, conditions, statistiques, panoplies |
+| `client/equipment.html` | Panneau d'équipement complet |
+| `docs/effects.md` | Mapping `effectId` → effet lisible et niveaux de confiance |
+
+### Ce que fait l'interface
+
+- Catalogue filtrable par emplacement, niveau et nom.
+- **Jets tirés dans les bornes officielles et figés à l'équipement**, avec
+  affichage de la fourchette et de la position du jet obtenu.
+- Modes de jet : aléatoire, minimal, moyen, maximal — pour comparer un objet
+  parfait à un objet moyen. Graine reproductible.
+- Capacité respectée par emplacement (2 anneaux, 6 Dofus/trophées, etc.) et
+  refus des doublons sur un même emplacement.
+- **Panoplies** détectées automatiquement, avec palier atteint et bonus appliqué.
+- Récapitulatif des statistiques : base, apport des objets, apport des
+  panoplies, total — et points de vie dérivés de la vitalité.
+- Export / import d'un build en JSON.
+
+### Le point délicat : les identifiants d'effets
+
+Les objets ne portent pas d'effets lisibles mais des identifiants numériques.
+Se tromper sur l'un d'eux ne provoque aucun plantage : cela produit des
+statistiques fausses, donc des dégâts faux, dans un simulateur qui a l'air de
+fonctionner. Trois garde-fous :
+
+1. Le libellé est **dérivé de l'API** (gabarit de description Ankama), pas
+   d'une table recopiée à la main.
+2. Il est **recoupé** avec une table indépendante ; concordance ⇒ `verifie`,
+   API seule ⇒ `probable`, divergence ⇒ `incertain`, signalée à l'extraction.
+3. `client/items.js` **n'interprète aucun identifiant** : il agrège par clé
+   normalisée. Un effet non confirmé reste **affiché** dans la fiche de l'objet
+   et dans un encart dédié, mais **n'entre dans aucun total**.
+
+Un effet affiché mais non compté est un manque visible ; un effet compté à tort
+est une erreur invisible. Voir [`docs/effects.md`](docs/effects.md).
+
+### Deuxième écart assumé avec le brief : les PA de base
+
+Le brief annonce « PA : 10 par défaut ». Le jeu officiel donne **6 PA et 3 PM**
+à tout personnage quel que soit son niveau — les 10 à 12 PA des builds de haut
+niveau viennent de l'équipement. La fidélité mécanique étant l'objectif premier,
+`client/items.js` retient 6 PA, dans la constante `BASE_CHARACTER` : revenir à
+10 ne demande qu'une ligne.
+
+Sont également marquées « à confirmer » dans le code, faute de source
+vérifiable hors ligne : les points de vie de base (55 au niveau 1, +5 par
+niveau) et le caractère **non cumulatif** des paliers de panoplie (4 pièces ⇒
+bonus « 4 pièces » seul, et non la somme des paliers).
+
+### Limites connues
+
+- Le champ `criteria` des objets (conditions du type `CS>20&PL<50`) est
+  **conservé brut et non interprété**. Seule la condition de niveau est
+  appliquée. Les autres conditions sont **affichées** sur la fiche sans
+  empêcher d'équiper : un filtre fondé sur une grammaire mal comprise
+  masquerait des objets valides, ce qui est plus difficile à repérer.
+- Le classement d'un type d'objet vers un emplacement repose sur le **nom** du
+  type, vérifiable d'un coup d'œil, et non sur un identifiant numérique. Les
+  types non reconnus sont listés en fin d'extraction pour être ajoutés en une
+  ligne à `SLOT_BY_TYPE`.
+
+### Tests
+
+`npm test` couvre les deux versions, sans réseau ni navigateur :
+
+| Fichier | Portée |
+|---|---|
+| `tests/grid.test.js` | Géométrie et LDV de la v0.1, extraites du livrable HTML |
+| `tests/items.test.js` | Jets, emplacements, statistiques, panoplies |
+| `tests/fetch_items.test.js` | `fetch_items.js` de bout en bout contre une fausse API DofusDB |
+
+L'interface d'équipement a par ailleurs été vérifiée dans un navigateur
+(équipement, filtres, relance des jets, export/import, effets non cumulés).
+
+---
+
+## Version 0.1 — fondations géométriques
 
 **Livrable : [`client/index.html`](client/index.html)** — un fichier HTML unique,
 sans aucune dépendance. Ouvrez-le directement dans un navigateur (double-clic,
@@ -145,5 +260,8 @@ diagonaux passant par les coins (le cas discriminant pour la règle des cellules
 
 ## Suite de la feuille de route
 
-Version 0.2 — extraction des équipements depuis `api.dofusdb.fr` et interface
-d'équipement. Voir [`docs/brief.md`](docs/brief.md) pour le détail des jalons.
+Version 0.3 — sorts du Iop et du Crâ : `scripts/fetch_spells.js`, format
+déclaratif des sorts, interpréteur d'effets (`damage`, `heal`, `boost`,
+`state`, `shield`) et interface de test sur la grille.
+
+Voir [`docs/brief.md`](docs/brief.md) pour le détail des jalons.

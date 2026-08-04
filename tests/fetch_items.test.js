@@ -1,0 +1,130 @@
+/**
+ * Tests de bout en bout de scripts/fetch_items.js.
+ *
+ * L'API DofusDB n'est pas sollicitée : `tests/mock-api.js` est préchargé et
+ * remplace fetch par une fausse API respectant le schéma FeathersJS de DofusDB
+ * (pagination $limit/$skip, textes i18n, possibleEffects, panoplies indexées
+ * par nombre de pièces). Sont vérifiés la pagination, le classement par
+ * emplacement, la normalisation des bornes et les niveaux de confiance.
+ */
+
+"use strict";
+
+const assert = require("assert");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { spawnSync } = require("child_process");
+
+const ROOT = path.join(__dirname, "..");
+const SCRIPT = path.join(ROOT, "scripts", "fetch_items.js");
+const MOCK = path.join(__dirname, "mock-api.js");
+
+const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "kolizeum-fetch-"));
+
+// Une taille de page volontairement petite force plusieurs tours de pagination.
+const run = spawnSync(
+  process.execPath,
+  ["--require", MOCK, SCRIPT, "--out", outDir, "--delay", "0", "--page-size", "4"],
+  { encoding: "utf8", cwd: ROOT }
+);
+assert.strictEqual(run.status, 0, `le script doit réussir :\n${run.stderr}`);
+
+// Les avertissements passent par console.warn : le rapport complet réunit les
+// deux flux.
+const report = `${run.stdout}\n${run.stderr}`;
+
+const payload = JSON.parse(fs.readFileSync(path.join(outDir, "items.json"), "utf8"));
+const byId = new Map(payload.items.map((i) => [i.id, i]));
+
+/* --- Fichiers produits ----------------------------------------------------- */
+{
+  for (const file of ["items.json", "items.data.js", "effects-map.json"]) {
+    assert.ok(fs.existsSync(path.join(outDir, file)), `${file} doit être écrit`);
+  }
+  const js = fs.readFileSync(path.join(outDir, "items.data.js"), "utf8");
+  assert.ok(js.startsWith("window.KOLIZEUM_ITEMS = "), "variante file:// exploitable");
+}
+
+/* --- Pagination : tout est récupéré malgré des pages de 4 ------------------ */
+{
+  // 14 objets dans la fausse API, dont 1 hors type d'équipement (filtré côté
+  // requête) et 1 sans effet utile (filtré à la transformation).
+  assert.strictEqual(payload.items.length, 12, "objets conservés");
+  assert.strictEqual(payload.meta.counts.effects, 15, "effets récupérés");
+  assert.strictEqual(payload.sets.length, 1, "panoplies conservées");
+}
+
+/* --- Classement par emplacement -------------------------------------------- */
+{
+  const slots = payload.meta.slotCounts;
+  assert.strictEqual(slots.arme, 2, "épée et arc classés en arme");
+  assert.strictEqual(slots.anneau, 2, "anneaux classés");
+  assert.ok(!("autre" in slots), "aucun objet non classé conservé");
+  assert.ok(!byId.has(11), "objet de type Ressource écarté");
+  assert.ok(!byId.has(12), "objet sans effet utile écarté");
+}
+
+/* --- Normalisation des bornes ---------------------------------------------- */
+{
+  // La fausse API fournit diceNum=12, diceSide=4 : les bornes doivent être remises
+  // dans l'ordre plutôt que de produire une fourchette vide.
+  assert.deepStrictEqual(byId.get(14).effects, [{ effectId: 118, min: 4, max: 12 }],
+    "bornes inversées corrigées");
+
+  // diceSide nul signale une valeur fixe.
+  assert.deepStrictEqual(byId.get(9).effects, [{ effectId: 125, min: 100, max: 100 }],
+    "valeur fixe");
+}
+
+/* --- Champs d'arme --------------------------------------------------------- */
+{
+  const epee = byId.get(7).weapon;
+  assert.strictEqual(epee.apCost, 4, "coût en PA");
+  assert.strictEqual(epee.maxRange, 1, "portée maximale");
+  assert.strictEqual(epee.twoHanded, false, "arme à une main");
+
+  const arc = byId.get(8).weapon;
+  assert.strictEqual(arc.minRange, 2, "portée minimale");
+  assert.strictEqual(arc.maxRange, 7, "portée maximale");
+  assert.strictEqual(arc.twoHanded, true, "arme à deux mains");
+}
+
+/* --- Panoplies : bonus indexés par nombre de pièces ------------------------ */
+{
+  const bonuses = payload.sets[0].bonuses;
+  assert.deepStrictEqual(bonuses["2"], [{ effectId: 125, value: 10 }], "palier 2 pièces");
+  assert.deepStrictEqual(bonuses["3"], [{ effectId: 118, value: 15 }], "palier 3 pièces");
+  assert.strictEqual(bonuses["4"].length, 2, "palier 4 pièces");
+  assert.ok(!("6" in bonuses), "paliers vides écartés");
+}
+
+/* --- Niveaux de confiance -------------------------------------------------- */
+{
+  const e = payload.effects;
+  assert.strictEqual(e[125].confidence, "verifie", "API et table concordantes");
+  assert.strictEqual(e[210].confidence, "probable", "dérivé de l'API seule");
+  // La fausse API annonce « Prospection » pour 158, la table attend « Soins ».
+  assert.strictEqual(e[158].confidence, "incertain", "divergence signalée");
+  assert.ok(payload.meta.warnings.some((w) => /158/.test(w)), "divergence reportée dans meta");
+  assert.ok(/158/.test(report), "divergence affichée à l'utilisateur");
+}
+
+/* --- Libellés et statistiques agrégées ------------------------------------- */
+{
+  const e = payload.effects;
+  assert.strictEqual(e[125].label, "Vitalité", "libellé extrait du gabarit");
+  assert.strictEqual(e[125].statKey, "vitalite", "statistique agrégée résolue");
+  assert.strictEqual(e[210].statKey, "resPctTerre", "résistance en pourcentage");
+  assert.strictEqual(e[240].statKey, "resFixeFeu", "résistance fixe");
+  assert.strictEqual(e[400].statKey, null, "effet sans statistique agrégée");
+}
+
+/* --- Rapport à l'utilisateur ----------------------------------------------- */
+{
+  assert.ok(/Ressource/.test(report), "types non classés signalés");
+  assert.ok(/Potion/.test(report), "types non classés listés");
+}
+
+fs.rmSync(outDir, { recursive: true, force: true });
+console.log("fetch_items.test.js : OK");

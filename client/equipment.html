@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kolizéum — v0.2 — Équipement</title>
+<style>
+  :root {
+    --bg: #14171d; --panel: #1c2029; --panel-2: #232833; --line: #333a47;
+    --text: #dfe4ec; --muted: #8f9aad; --accent: #5aa9e6;
+    --ok: #4cc38a; --ko: #e5484d; --warn: #f5a524;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  /* ---------- Bandeau ---------- */
+  header {
+    flex: 0 0 auto; background: var(--panel); border-bottom: 1px solid var(--line);
+    padding: 10px 16px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  }
+  h1 { font-size: 15px; margin: 0; letter-spacing: .2px; }
+  h1 span { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .field { display: flex; align-items: center; gap: 7px; }
+  .field label { color: var(--muted); white-space: nowrap; }
+  input[type=number], input[type=text], select {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 4px; padding: 4px 7px; font: inherit;
+  }
+  input[type=number] { width: 68px; }
+  input[type=range] { accent-color: var(--accent); }
+  button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 5px; padding: 5px 10px; font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: #fff; }
+  button.primary { background: #24486a; border-color: #2f6595; }
+  button.danger:hover { border-color: var(--ko); color: #fff; }
+
+  #banner {
+    flex: 0 0 auto; padding: 7px 16px; font-size: 12px;
+    background: #3a2418; border-bottom: 1px solid #6b3f22; color: #f0c9a0;
+  }
+  #banner.hidden { display: none; }
+  #banner b { color: var(--warn); }
+
+  /* ---------- Colonnes ---------- */
+  #cols { flex: 1 1 auto; display: flex; min-height: 0; }
+  .col { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  #colSlots { flex: 0 0 350px; border-right: 1px solid var(--line); }
+  #colCatalog { flex: 1 1 auto; border-right: 1px solid var(--line); }
+  #colStats { flex: 0 0 348px; }
+  .col > h2 {
+    flex: 0 0 auto; margin: 0; padding: 9px 14px;
+    font-size: 11px; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--muted); background: var(--panel); border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  }
+  .col > .body { flex: 1 1 auto; overflow-y: auto; padding: 10px; }
+
+  /* ---------- Emplacements ---------- */
+  .slot {
+    border: 1px solid var(--line); border-radius: 6px; margin-bottom: 7px;
+    background: var(--panel); overflow: hidden;
+  }
+  .slot.active { border-color: var(--accent); }
+  .slot-head {
+    display: flex; align-items: center; gap: 8px; padding: 6px 9px;
+    background: var(--panel-2); cursor: pointer;
+  }
+  .slot-head:hover { background: #2a3040; }
+  .slot-name { flex: 1 1 auto; color: var(--muted); font-size: 11px;
+               text-transform: uppercase; letter-spacing: .06em; }
+  .slot-count { color: var(--muted); font: 11px ui-monospace, monospace; }
+  .equipped { padding: 7px 9px; border-top: 1px solid var(--line); }
+  .equipped + .equipped { border-top: 1px dashed var(--line); }
+  .eq-title { display: flex; align-items: baseline; gap: 7px; }
+  .eq-title b { font-weight: 600; }
+  .eq-lvl { color: var(--muted); font-size: 11px; }
+  .eq-actions { margin-left: auto; display: flex; gap: 4px; }
+  .eq-actions button { padding: 1px 6px; font-size: 11px; }
+  .empty-slot { padding: 7px 9px; color: #5c6577; font-style: italic; border-top: 1px solid var(--line); }
+
+  .fx { margin: 4px 0 0; padding: 0; list-style: none; font: 12px ui-monospace, monospace; }
+  .fx li { display: flex; align-items: center; gap: 6px; }
+  .fx .val { color: var(--ok); min-width: 42px; }
+  .fx .val.neg { color: var(--ko); }
+  .fx .lbl { flex: 1 1 auto; color: var(--text); }
+  .fx .rng { color: #5c6577; font-size: 11px; }
+  .fx .bar { width: 34px; height: 4px; background: #2b313d; border-radius: 2px; overflow: hidden; }
+  .fx .bar i { display: block; height: 100%; background: var(--accent); }
+  .fx .unk { color: var(--warn); }
+
+  /* ---------- Catalogue ---------- */
+  #catalogTools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #search { flex: 1 1 160px; min-width: 120px; }
+  .item {
+    border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px;
+    margin-bottom: 6px; background: var(--panel); cursor: pointer;
+  }
+  .item:hover { border-color: var(--accent); }
+  .item.locked { opacity: .5; }
+  .item-head { display: flex; align-items: baseline; gap: 8px; }
+  .item-head b { flex: 0 1 auto; }
+  .item-slot { color: var(--muted); font-size: 11px; }
+  .item-set { color: var(--accent); font-size: 11px; margin-left: auto; }
+  .item-lvl {
+    font: 11px ui-monospace, monospace; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 3px; padding: 0 5px;
+  }
+  .item .req { color: var(--ko); font-size: 11px; margin-top: 3px; }
+  .item .note { color: var(--warn); font-size: 11px; margin-top: 3px; }
+  .weapon-line { color: var(--muted); font-size: 11px; margin-top: 3px; }
+  .muted { color: var(--muted); }
+  .empty-msg { color: var(--muted); text-align: center; padding: 26px 10px; }
+
+  /* ---------- Statistiques ---------- */
+  .stat-group { margin-bottom: 14px; }
+  .stat-group h3 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); margin: 0 0 5px; padding-bottom: 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  table.stats { width: 100%; border-collapse: collapse; font: 12px ui-monospace, monospace; }
+  table.stats td { padding: 1px 0; }
+  table.stats td.lbl { color: var(--muted); }
+  table.stats td.num { text-align: right; width: 52px; }
+  table.stats td.detail {
+    text-align: right; width: 124px; color: #5c6577;
+    font-size: 10.5px; white-space: nowrap;   /* le détail ne doit jamais se replier */
+  }
+  table.stats tr.zero { display: none; }
+  table.stats tr.zero.show { display: table-row; }
+  .group-empty { color: #5c6577; font-size: 11.5px; font-style: italic; }
+  .group-empty.hidden { display: none; }
+  .life {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px 10px; margin-bottom: 12px;
+  }
+  .life .big { font-size: 21px; font-weight: 600; color: var(--ok); }
+  .set-card {
+    border: 1px solid #2f6595; background: #1b2735; border-radius: 6px;
+    padding: 7px 9px; margin-bottom: 6px;
+  }
+  .set-card .name { color: var(--accent); font-weight: 600; }
+  .set-card .pieces { color: var(--muted); font-size: 11px; }
+  .warn-card {
+    border: 1px solid #6b3f22; background: #2a1d14; border-radius: 6px;
+    padding: 7px 9px; margin-bottom: 6px; font-size: 12px;
+  }
+  .warn-card .name { color: var(--warn); font-weight: 600; }
+  textarea {
+    width: 100%; height: 70px; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 4px; padding: 6px;
+    font: 11px/1.4 ui-monospace, monospace; resize: vertical;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Kolizéum <span>— v0.2 · équipement</span></h1>
+  <div class="field">
+    <label for="level">Niveau</label>
+    <input type="number" id="level" min="1" max="200" value="200">
+    <input type="range" id="levelRange" min="1" max="200" value="200">
+  </div>
+  <div class="field">
+    <label for="quality">Jets</label>
+    <select id="quality">
+      <option value="random" selected>Aléatoires</option>
+      <option value="1">Maximaux</option>
+      <option value="0.5">Moyens</option>
+      <option value="0">Minimaux</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="seed">Graine</label>
+    <input type="text" id="seed" value="1" style="width:80px">
+  </div>
+  <button id="btnRerollAll">Relancer tout</button>
+  <button id="btnClear" class="danger">Tout retirer</button>
+  <button id="btnExport">Exporter</button>
+  <button id="btnImport">Importer</button>
+</header>
+
+<div id="banner" class="hidden"></div>
+
+<div id="cols">
+  <div class="col" id="colSlots">
+    <h2><span>Personnage</span><span id="slotSummary" class="muted"></span></h2>
+    <div class="body" id="slotsBody"></div>
+  </div>
+
+  <div class="col" id="colCatalog">
+    <h2>
+      <span id="catalogTitle">Catalogue</span>
+      <span id="catalogCount" class="muted"></span>
+    </h2>
+    <div class="body">
+      <div id="catalogTools">
+        <input type="text" id="search" placeholder="Rechercher un objet…">
+        <select id="slotFilter"></select>
+        <label class="field"><input type="checkbox" id="ignoreLevel"> <span class="muted">Ignorer le niveau</span></label>
+        <select id="sort">
+          <option value="level">Tri : niveau</option>
+          <option value="name">Tri : nom</option>
+        </select>
+      </div>
+      <div id="catalogList" style="margin-top:10px"></div>
+    </div>
+  </div>
+
+  <div class="col" id="colStats">
+    <h2>Statistiques</h2>
+    <div class="body" id="statsBody"></div>
+  </div>
+</div>
+
+<script src="items.js"></script>
+<!-- Données officielles produites par scripts/fetch_items.js. Absentes tant que
+     le script n'a pas tourné : le fichier d'exemple prend alors le relais. -->
+<script src="data/items.data.js" onerror="window.KOLIZEUM_DATA_MISSING = true"></script>
+<script src="data/items.sample.data.js"></script>
+<script>
+"use strict";
+
+const Items = Kolizeum.Items;
+const $ = (id) => document.getElementById(id);
+
+const state = {
+  data: null,
+  loadout: Items.createLoadout(),
+  level: 200,
+  quality: "random",
+  activeSlot: null,      // emplacement en cours de sélection
+  search: "",
+  ignoreLevel: false,
+  sort: "level",
+  rng: Items.makeRng("1"),
+};
+
+/* ==========================================================================
+   Utilitaires d'affichage
+   ========================================================================== */
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+function signed(n) { return n > 0 ? `+${n}` : String(n); }
+
+/** Liste d'effets d'un objet équipé : valeur obtenue, bornes, position du jet. */
+function effectList(item, roll) {
+  const ul = el("ul", "fx");
+  for (const effect of item.effects) {
+    const info = Items.describeEffect(effect, state.data, roll ? roll[effect.effectId] : undefined);
+    const li = el("li");
+
+    const val = el("span", "val", info.value != null ? signed(info.value) : `${effect.min}~${effect.max}`);
+    if (info.value != null && info.value < 0) val.classList.add("neg");
+    li.appendChild(val);
+
+    const lbl = el("span", "lbl", info.label);
+    if (!info.statKey) {
+      lbl.classList.add("unk");
+      lbl.title = "Effet non agrégé : sa signification n'est pas confirmée. "
+                + "Il est affiché mais n'entre dans aucun total.";
+      lbl.textContent += " ⚠";
+    }
+    li.appendChild(lbl);
+
+    if (effect.min !== effect.max) {
+      li.appendChild(el("span", "rng", `${effect.min}–${effect.max}`));
+      if (info.value != null) {
+        const bar = el("span", "bar");
+        const fill = el("i");
+        const ratio = (info.value - effect.min) / (effect.max - effect.min);
+        fill.style.width = `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`;
+        bar.appendChild(fill);
+        bar.title = `Jet : ${info.value} sur ${effect.min}–${effect.max}`;
+        li.appendChild(bar);
+      }
+    }
+    ul.appendChild(li);
+  }
+  return ul;
+}
+
+function weaponLine(item) {
+  const w = item.weapon;
+  if (!w) return null;
+  const bits = [];
+  if (w.apCost != null) bits.push(`${w.apCost} PA`);
+  if (w.maxRange != null) bits.push(`portée ${w.minRange ?? 0}–${w.maxRange}`);
+  if (w.criticalHitProbability) bits.push(`CC 1/${w.criticalHitProbability}`);
+  if (w.criticalHitBonus) bits.push(`bonus CC ${w.criticalHitBonus}`);
+  if (w.maxCastPerTurn) bits.push(`${w.maxCastPerTurn}×/tour`);
+  if (w.twoHanded) bits.push("deux mains");
+  return bits.length ? el("div", "weapon-line", bits.join(" · ")) : null;
+}
+
+/* ==========================================================================
+   Rendu — emplacements
+   ========================================================================== */
+
+function renderSlots() {
+  const body = $("slotsBody");
+  body.textContent = "";
+  let equippedCount = 0;
+
+  for (const slot of Items.SLOT_ORDER) {
+    const capacity = Items.SLOT_CAPACITY[slot];
+    const entries = state.loadout.slots[slot];
+    equippedCount += entries.length;
+
+    const box = el("div", "slot" + (state.activeSlot === slot ? " active" : ""));
+
+    const head = el("div", "slot-head");
+    head.appendChild(el("span", "slot-name", Items.SLOT_LABELS[slot]));
+    head.appendChild(el("span", "slot-count", `${entries.length}/${capacity}`));
+    head.addEventListener("click", () => {
+      state.activeSlot = state.activeSlot === slot ? null : slot;
+      $("slotFilter").value = state.activeSlot || "";
+      render();
+    });
+    box.appendChild(head);
+
+    entries.forEach((entry, index) => {
+      const item = state.data.itemById.get(entry.itemId);
+      if (!item) return;
+      const row = el("div", "equipped");
+
+      const title = el("div", "eq-title");
+      title.appendChild(el("b", null, item.name));
+      title.appendChild(el("span", "eq-lvl", `niv. ${item.level}`));
+
+      const actions = el("div", "eq-actions");
+      const reroll = el("button", null, "↻");
+      reroll.title = "Relancer les jets de cet objet";
+      reroll.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        entry.roll = Items.rollItem(item, state.rng, qualityValue());
+        render();
+      });
+      const remove = el("button", "danger", "✕");
+      remove.title = "Retirer";
+      remove.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        Items.unequip(state.loadout, slot, index);
+        render();
+      });
+      actions.append(reroll, remove);
+      title.appendChild(actions);
+      row.appendChild(title);
+
+      const w = weaponLine(item);
+      if (w) row.appendChild(w);
+      row.appendChild(effectList(item, entry.roll));
+      box.appendChild(row);
+    });
+
+    for (let i = entries.length; i < capacity; i++) {
+      box.appendChild(el("div", "empty-slot", "vide"));
+    }
+    body.appendChild(box);
+  }
+
+  const totalCapacity = Object.values(Items.SLOT_CAPACITY).reduce((a, b) => a + b, 0);
+  $("slotSummary").textContent = `${equippedCount}/${totalCapacity} équipés`;
+}
+
+/* ==========================================================================
+   Rendu — catalogue
+   ========================================================================== */
+
+function renderCatalog() {
+  const list = $("catalogList");
+  list.textContent = "";
+
+  const criteria = { search: state.search, sort: state.sort };
+  if (state.activeSlot) criteria.slot = state.activeSlot;
+  if (!state.ignoreLevel) criteria.maxLevel = state.level;
+
+  const items = Items.filterItems(state.data, criteria);
+  $("catalogCount").textContent = `${items.length} objet${items.length > 1 ? "s" : ""}`;
+  $("catalogTitle").textContent = state.activeSlot
+    ? `Catalogue — ${Items.SLOT_LABELS[state.activeSlot]}`
+    : "Catalogue";
+
+  if (!items.length) {
+    list.appendChild(el("div", "empty-msg", "Aucun objet ne correspond aux filtres."));
+    return;
+  }
+
+  // Le rendu est borné : au-delà, la recherche est le bon outil.
+  const shown = items.slice(0, 300);
+  for (const item of shown) {
+    const req = Items.checkRequirements(item, { level: state.level });
+    const card = el("div", "item" + (req.ok ? "" : " locked"));
+
+    const head = el("div", "item-head");
+    head.appendChild(el("span", "item-lvl", String(item.level)));
+    head.appendChild(el("b", null, item.name));
+    head.appendChild(el("span", "item-slot", Items.SLOT_LABELS[item.slot] || item.slot));
+    if (item.setId != null) {
+      const set = state.data.setById.get(item.setId);
+      if (set) head.appendChild(el("span", "item-set", set.name));
+    }
+    card.appendChild(head);
+
+    const w = weaponLine(item);
+    if (w) card.appendChild(w);
+    card.appendChild(effectList(item, null));
+
+    for (const problem of req.problems) card.appendChild(el("div", "req", problem));
+    for (const note of req.notes) card.appendChild(el("div", "note", note));
+
+    card.addEventListener("click", () => {
+      if (!req.ok) return;
+      const res = Items.equip(state.loadout, item, { rng: state.rng, quality: qualityValue() });
+      if (!res.ok) { card.appendChild(el("div", "req", res.reason)); return; }
+      render();
+    });
+    list.appendChild(card);
+  }
+
+  if (items.length > shown.length) {
+    list.appendChild(el("div", "empty-msg",
+      `${items.length - shown.length} objets supplémentaires — affinez la recherche.`));
+  }
+}
+
+/* ==========================================================================
+   Rendu — statistiques
+   ========================================================================== */
+
+function renderStats() {
+  const body = $("statsBody");
+  body.textContent = "";
+  const s = Items.computeStats(state.loadout, state.data, { level: state.level });
+
+  // Vie
+  const life = el("div", "life");
+  life.appendChild(el("div", "muted", "Points de vie"));
+  life.appendChild(el("div", "big", String(s.life.total)));
+  life.appendChild(el("div", "muted",
+    `${s.life.base} de base + ${s.life.fromVitality} de vitalité`));
+  body.appendChild(life);
+
+  // Panoplies actives
+  for (const set of s.sets) {
+    const card = el("div", "set-card");
+    card.appendChild(el("div", "name", set.name));
+    card.appendChild(el("div", "pieces",
+      `${set.pieces}/${set.totalItems} pièces — bonus du palier ${set.tier}`));
+    const ul = el("ul", "fx");
+    for (const e of set.effects) {
+      const def = state.data.effects[e.effectId];
+      const li = el("li");
+      const val = el("span", "val", signed(e.value));
+      if (e.value < 0) val.classList.add("neg");
+      li.appendChild(val);
+      li.appendChild(el("span", "lbl", (def && def.label) || `effet ${e.effectId}`));
+      ul.appendChild(li);
+    }
+    card.appendChild(ul);
+    body.appendChild(card);
+  }
+
+  // Effets non agrégés
+  if (s.unaggregated.length) {
+    const card = el("div", "warn-card");
+    card.appendChild(el("div", "name", "Effets non cumulés"));
+    card.appendChild(el("div", "muted",
+      "Signification non confirmée : affichés, mais exclus des totaux."));
+    const ul = el("ul", "fx");
+    for (const u of s.unaggregated) {
+      const li = el("li");
+      li.appendChild(el("span", "val", signed(u.value)));
+      li.appendChild(el("span", "lbl", `${u.label} — ${u.origin}`));
+      ul.appendChild(li);
+    }
+    card.appendChild(ul);
+    body.appendChild(card);
+  }
+
+  // Tableaux par groupe
+  for (const group of Items.STAT_GROUPS) {
+    const box = el("div", "stat-group");
+    box.appendChild(el("h3", null, group.title));
+    const table = el("table", "stats");
+    let nonZero = 0;
+
+    for (const [key, label] of group.stats) {
+      const total = s.total[key];
+      if (total !== 0) nonZero++;
+      const tr = el("tr", total === 0 ? "zero" : null);
+      tr.appendChild(el("td", "lbl", label));
+      tr.appendChild(el("td", "num", total === 0 ? "—" : signed(total)));
+
+      const parts = [];
+      if (s.base[key]) parts.push(`${s.base[key]} base`);
+      if (s.fromItems[key]) parts.push(`${signed(s.fromItems[key])} obj.`);
+      if (s.fromSets[key]) parts.push(`${signed(s.fromSets[key])} pan.`);
+      tr.appendChild(el("td", "detail", parts.join(" ")));
+      table.appendChild(tr);
+    }
+    box.appendChild(table);
+    // Un groupe entièrement nul afficherait un titre suivi de rien : on le dit.
+    if (!nonZero) box.appendChild(el("div", "group-empty", "aucun bonus dans ce groupe"));
+    body.appendChild(box);
+  }
+
+  const toggle = el("button", null, "Afficher les statistiques nulles");
+  let showZeros = false;
+  toggle.addEventListener("click", () => {
+    showZeros = !showZeros;
+    for (const tr of body.querySelectorAll("tr.zero")) tr.classList.toggle("show", showZeros);
+    for (const node of body.querySelectorAll(".group-empty")) node.classList.toggle("hidden", showZeros);
+    toggle.textContent = showZeros ? "Masquer les statistiques nulles" : "Afficher les statistiques nulles";
+  });
+  body.appendChild(toggle);
+}
+
+function render() {
+  renderSlots();
+  renderCatalog();
+  renderStats();
+}
+
+/* ==========================================================================
+   Contrôles
+   ========================================================================== */
+
+function qualityValue() {
+  return state.quality === "random" ? null : Number(state.quality);
+}
+
+function setLevel(value) {
+  state.level = Math.max(1, Math.min(200, Number(value) || 1));
+  $("level").value = state.level;
+  $("levelRange").value = state.level;
+  render();
+}
+
+$("level").addEventListener("change", (e) => setLevel(e.target.value));
+$("levelRange").addEventListener("input", (e) => setLevel(e.target.value));
+$("quality").addEventListener("change", (e) => { state.quality = e.target.value; });
+$("seed").addEventListener("change", (e) => { state.rng = Items.makeRng(e.target.value); });
+$("search").addEventListener("input", (e) => { state.search = e.target.value; renderCatalog(); });
+$("sort").addEventListener("change", (e) => { state.sort = e.target.value; renderCatalog(); });
+$("ignoreLevel").addEventListener("change", (e) => { state.ignoreLevel = e.target.checked; renderCatalog(); });
+$("slotFilter").addEventListener("change", (e) => {
+  state.activeSlot = e.target.value || null;
+  render();
+});
+
+$("btnClear").addEventListener("click", () => {
+  state.loadout = Items.createLoadout();
+  render();
+});
+
+$("btnRerollAll").addEventListener("click", () => {
+  for (const slot of Items.SLOT_ORDER) {
+    for (const entry of state.loadout.slots[slot]) {
+      const item = state.data.itemById.get(entry.itemId);
+      if (item) entry.roll = Items.rollItem(item, state.rng, qualityValue());
+    }
+  }
+  render();
+});
+
+$("btnExport").addEventListener("click", () => {
+  const json = JSON.stringify(Items.exportLoadout(state.loadout, { level: state.level }));
+  showIo(json, "Build exporté — copiez ce JSON.");
+});
+
+$("btnImport").addEventListener("click", () => {
+  const box = showIo("", "Collez un JSON de build puis validez.");
+  box.confirm.addEventListener("click", () => {
+    try {
+      const payload = JSON.parse(box.textarea.value);
+      state.loadout = Items.importLoadout(payload);
+      if (payload.character && payload.character.level) setLevel(payload.character.level);
+      box.dialog.remove();
+      render();
+    } catch (err) {
+      box.error.textContent = `JSON invalide : ${err.message}`;
+    }
+  });
+});
+
+/** Petite boîte de dialogue d'import/export, sans dépendance. */
+function showIo(value, hint) {
+  const existing = document.getElementById("ioDialog");
+  if (existing) existing.remove();
+
+  const dialog = el("div");
+  dialog.id = "ioDialog";
+  Object.assign(dialog.style, {
+    position: "fixed", inset: "0", background: "#000a", display: "flex",
+    alignItems: "center", justifyContent: "center", zIndex: "10",
+  });
+
+  const panel = el("div");
+  Object.assign(panel.style, {
+    background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "8px",
+    padding: "14px", width: "min(560px, 90vw)",
+  });
+  panel.appendChild(el("div", "muted", hint));
+
+  const textarea = el("textarea");
+  textarea.value = value;
+  textarea.style.marginTop = "8px";
+  panel.appendChild(textarea);
+
+  const error = el("div", "req");
+  panel.appendChild(error);
+
+  const row = el("div");
+  row.style.cssText = "display:flex; gap:8px; justify-content:flex-end; margin-top:8px";
+  const confirm = el("button", "primary", "Importer");
+  const close = el("button", null, "Fermer");
+  close.addEventListener("click", () => dialog.remove());
+  row.append(confirm, close);
+  panel.appendChild(row);
+
+  dialog.appendChild(panel);
+  dialog.addEventListener("click", (ev) => { if (ev.target === dialog) dialog.remove(); });
+  document.body.appendChild(dialog);
+  textarea.select();
+  return { dialog, textarea, confirm, error };
+}
+
+/* ==========================================================================
+   Amorçage
+   ========================================================================== */
+
+function fillSlotFilter() {
+  const select = $("slotFilter");
+  select.appendChild(new Option("Tous les emplacements", ""));
+  for (const slot of Items.SLOT_ORDER) {
+    select.appendChild(new Option(Items.SLOT_LABELS[slot], slot));
+  }
+}
+
+function showBanner(data) {
+  const banner = $("banner");
+  if (data.isSample) {
+    banner.classList.remove("hidden");
+    banner.innerHTML = "<b>Données d'exemple — fictives.</b> Ces objets sont inventés et "
+      + "ne correspondent à aucun objet du jeu. Lancez <code>node scripts/fetch_items.js</code> "
+      + "pour récupérer les données officielles depuis DofusDB.";
+    return;
+  }
+  const warnings = (data.meta && data.meta.warnings) || [];
+  if (warnings.length) {
+    banner.classList.remove("hidden");
+    banner.innerHTML = `<b>${warnings.length} avertissement(s) à l'extraction :</b> `
+      + warnings.slice(0, 3).map((w) => String(w).replace(/</g, "&lt;")).join(" · ");
+  }
+}
+
+function boot() {
+  if (!window.KOLIZEUM_ITEMS) {
+    document.body.innerHTML =
+      '<div style="padding:40px; font: 14px/1.6 system-ui; color:#dfe4ec">'
+      + "<h2>Aucune donnée chargée</h2>"
+      + "<p>Générez un jeu de données avant d'ouvrir cette page :</p>"
+      + "<pre style='background:#232833; padding:10px; border-radius:6px'>"
+      + "node scripts/make_sample.js      # données d'exemple, sans réseau\n"
+      + "node scripts/fetch_items.js      # données officielles (DofusDB)</pre></div>";
+    return;
+  }
+
+  state.data = Items.indexData(window.KOLIZEUM_ITEMS);
+  showBanner(state.data);
+  fillSlotFilter();
+  state.rng = Items.makeRng($("seed").value);
+  setLevel(200);
+}
+
+boot();
+</script>
+</body>
+</html>
