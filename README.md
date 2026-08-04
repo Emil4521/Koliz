@@ -62,6 +62,24 @@ savoir quoi corriger dans les tables en tête de `scripts/fetch_items.js`.
 Les données sont également conservées en artefact téléchargeable pendant 14
 jours, y compris si le commit est désactivé.
 
+### Tout faire sans installer Node
+
+Un navigateur suffit, sur n'importe quel système :
+
+1. **Lancer le workflow** (onglet Actions) — l'extraction tourne chez GitHub.
+2. **Récupérer les données** : soit elles ont été commitées dans le dépôt, soit
+   l'artefact `items-fr` du run se télécharge en ZIP depuis la page du run.
+3. **Récupérer le projet** : bouton `Code` → `Download ZIP`, puis décompresser.
+4. Si vous avez pris l'artefact, y copier `items.data.js` dans `client/data/`.
+5. **Double-cliquer sur `client/equipment.html`.**
+
+Les données d'exemple étant versionnées, l'étape 4 est facultative : les pages
+s'ouvrent et fonctionnent dès la décompression, sur le jeu fictif.
+
+Node n'est nécessaire que pour lancer l'extraction ou les tests en local. Sous
+Windows : `winget install OpenJS.NodeJS.LTS` dans PowerShell, ou l'installeur
+de [nodejs.org](https://nodejs.org).
+
 ---
 
 ## Version 0.2 — équipements et interface d'équipement
