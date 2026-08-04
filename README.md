@@ -36,6 +36,32 @@ prend automatiquement le pas sur les données d'exemple au chargement de la page
 > `ERR_FILE_NOT_FOUND` sur `data/items.data.js` : c'est attendu, la page bascule
 > alors sur les données d'exemple et le bandeau orange le rappelle.
 
+### Extraire les données sans machine de développement
+
+iOS n'exécute pas Node.js : aucune app de l'App Store ne fournit de vrai
+runtime, le système interdisant l'exécution de code arbitraire. Le workflow
+[`.github/workflows/fetch-items.yml`](.github/workflows/fetch-items.yml) fait
+donc tourner le script sur les serveurs de GitHub, ce qui suffit depuis un
+téléphone.
+
+**Onglet Actions → « Extraire les équipements (DofusDB) » → Run workflow.**
+
+Options du formulaire :
+
+| Entrée | Effet |
+|---|---|
+| `lang` | Langue des libellés (`fr` par défaut) |
+| `max` | Nombre maximal d'objets — mettre `200` pour un premier essai rapide |
+| `commit` | Commiter les données dans le dépôt (activé par défaut) |
+
+Le workflow lance la suite de tests, extrait les données, puis publie le
+**rapport d'extraction dans le résumé du run** : types d'objets non classés,
+effets inconnus, divergences de mapping. C'est ce rapport qu'il faut lire pour
+savoir quoi corriger dans les tables en tête de `scripts/fetch_items.js`.
+
+Les données sont également conservées en artefact téléchargeable pendant 14
+jours, y compris si le commit est désactivé.
+
 ---
 
 ## Version 0.2 — équipements et interface d'équipement

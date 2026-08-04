@@ -1,0 +1,117 @@
+name: Extraire les équipements (DofusDB)
+
+# Déclenchement manuel uniquement : l'extraction interroge une API tierce et
+# écrit dans le dépôt, ce n'est pas quelque chose qui doit tourner tout seul.
+#
+# Ce workflow existe pour pouvoir lancer scripts/fetch_items.js sans machine de
+# développement — depuis un téléphone, par exemple. Il produit les données,
+# affiche le rapport d'extraction dans le résumé du run, et commite le résultat
+# sur la branche choisie.
+on:
+  workflow_dispatch:
+    inputs:
+      lang:
+        description: "Langue des libellés"
+        type: choice
+        options: ["fr", "en", "es", "de"]
+        default: "fr"
+      max:
+        description: "Nombre maximal d'objets (vide = tous ; mettre 200 pour un essai rapide)"
+        type: string
+        default: ""
+      commit:
+        description: "Commiter les données dans le dépôt"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  extraire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Vérifier la suite de tests
+        run: npm test
+
+      - name: Extraire les données
+        id: extraction
+        run: |
+          set -o pipefail
+          ARGS="--lang ${{ inputs.lang }}"
+          if [ -n "${{ inputs.max }}" ]; then ARGS="$ARGS --max ${{ inputs.max }}"; fi
+          echo "Commande : node scripts/fetch_items.js $ARGS"
+          # Les avertissements passent par stderr : on réunit les deux flux pour
+          # que le rapport soit complet dans le résumé.
+          node scripts/fetch_items.js $ARGS 2>&1 | tee extraction.log
+
+      - name: Publier le rapport d'extraction
+        if: always()
+        run: |
+          {
+            echo "## Rapport d'extraction"
+            echo ""
+            echo "Tout ce qui demande un arbitrage humain est listé ci-dessous :"
+            echo "types d'objets non classés, effets inconnus, divergences de mapping."
+            echo "Les corrections se font dans les tables en tête de \`scripts/fetch_items.js\`."
+            echo ""
+            echo '```'
+            # Le compteur de progression écrit des retours chariot et des codes
+            # d'échappement ANSI, illisibles dans un résumé : on les retire.
+            tr '\r' '\n' < extraction.log \
+              | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' \
+              | grep -v '^[[:space:]]*$' \
+              | tail -60
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Résumer les fichiers produits
+        if: always()
+        run: |
+          if [ -f client/data/items.json ]; then
+            {
+              echo ""
+              echo "### Fichiers produits"
+              echo ""
+              echo '| Fichier | Taille |'
+              echo '|---|---|'
+              for f in client/data/items.json client/data/items.data.js client/data/effects-map.json; do
+                [ -f "$f" ] && echo "| \`$f\` | $(du -h "$f" | cut -f1) |"
+              done
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Commiter les données
+        if: inputs.commit && success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add client/data/
+          if git diff --staged --quiet; then
+            echo "Aucun changement dans les données — rien à commiter."
+            exit 0
+          fi
+          git commit \
+            -m "données : extraction DofusDB (${{ inputs.lang }})" \
+            -m "Généré par le workflow fetch-items depuis scripts/fetch_items.js." \
+            -m "Run : ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          git push
+
+      - name: Conserver les données en artefact
+        if: always() && hashFiles('client/data/items.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: items-${{ inputs.lang }}
+          path: |
+            client/data/items.json
+            client/data/items.data.js
+            client/data/effects-map.json
+          retention-days: 14
