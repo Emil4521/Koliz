@@ -99,22 +99,40 @@ const byId = new Map(payload.items.map((i) => [i.id, i]));
   assert.ok(!("6" in bonuses), "paliers vides écartés");
 }
 
+/* --- Accolades imbriquées dans les gabarits --------------------------------
+   Régression observée en production : les gabarits réels imbriquent les
+   accolades, et une extraction en une passe laissait des orphelines
+   (« } Vitalité », « } Dommage } } »), ce qui cassait toute la résolution
+   vers les statistiques agrégées. */
+{
+  const e = payload.effects;
+  for (const [id, attendu] of [[125, "Vitalité"], [118, "Force"], [111, "PA"], [112, "Dommage"]]) {
+    assert.strictEqual(e[id].label, attendu, `libellé de l'effet ${id}`);
+    assert.ok(!/[{}]/.test(e[id].label), `aucune accolade résiduelle sur ${id}`);
+  }
+}
+
 /* --- Niveaux de confiance -------------------------------------------------- */
 {
   const e = payload.effects;
   assert.strictEqual(e[125].confidence, "verifie", "API et table concordantes");
   assert.strictEqual(e[210].confidence, "probable", "dérivé de l'API seule");
-  // La fausse API annonce « Prospection » pour 158, la table attend « Soins ».
-  assert.strictEqual(e[158].confidence, "incertain", "divergence signalée");
-  assert.ok(payload.meta.warnings.some((w) => /158/.test(w)), "divergence reportée dans meta");
-  assert.ok(/158/.test(report), "divergence affichée à l'utilisateur");
+  assert.strictEqual(e[158].confidence, "probable", "hors table de recoupement");
+
+  // Singulier contre pluriel : variation d'écriture, pas divergence de sens.
+  assert.strictEqual(e[112].confidence, "verifie", "« Dommage » vaut « Dommages »");
+
+  // Vraie divergence : la table attend « % Critique », l'API dit « % Coup Critique ».
+  assert.strictEqual(e[115].confidence, "incertain", "divergence de sens signalée");
+  assert.ok(payload.meta.warnings.some((w) => /115/.test(w)), "divergence reportée dans meta");
+  assert.ok(/115/.test(report), "divergence affichée à l'utilisateur");
 }
 
 /* --- Libellés et statistiques agrégées ------------------------------------- */
 {
   const e = payload.effects;
-  assert.strictEqual(e[125].label, "Vitalité", "libellé extrait du gabarit");
   assert.strictEqual(e[125].statKey, "vitalite", "statistique agrégée résolue");
+  assert.strictEqual(e[112].statKey, "domFixe", "le singulier résout vers la même statistique");
   assert.strictEqual(e[210].statKey, "resPctTerre", "résistance en pourcentage");
   assert.strictEqual(e[240].statKey, "resFixeFeu", "résistance fixe");
   assert.strictEqual(e[400].statKey, null, "effet sans statistique agrégée");

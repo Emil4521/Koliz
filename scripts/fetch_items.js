@@ -138,7 +138,13 @@ const STAT_BY_LABEL = {
 const EFFECT_CROSSCHECK = {
   111: "PA", 112: "Dommages", 115: "% Critique", 118: "Force",
   119: "Agilité", 123: "Chance", 124: "Sagesse", 125: "Vitalité",
-  126: "Intelligence", 128: "PM", 138: "% Dommages", 158: "Soins",
+  126: "Intelligence", 128: "PM",
+  // 138 et 158 retirés le 2026-08-04 : la table annonçait « % Dommages » et
+  // « Soins », l'API répond « Puissance » et « Pod ». Ces deux entrées étaient
+  // fausses. Les réintroduire avec la réponse de l'API rendrait le recoupement
+  // circulaire — il conclurait « vérifié » en comparant l'API à elle-même. Ils
+  // ressortent donc en « probable », ce qui est le niveau honnête tant qu'une
+  // source indépendante (Dofensive, jeu) n'a pas tranché.
 };
 
 /* ==========================================================================
@@ -204,15 +210,50 @@ function pickText(value, lang) {
 /**
  * Extrait un libellé lisible d'un gabarit de description Ankama.
  * Exemple : "+#1{~1~2 à }#2 Force" → "Force".
+ *
+ * Les gabarits réels contiennent des accolades IMBRIQUÉES : une simple passe
+ * de `\{[^}]*\}` s'arrête à la première fermante et laisse des orphelines,
+ * d'où les libellés « } PA » ou « } Dommage } } » observés en production.
+ * On dépouille donc les groupes les plus internes jusqu'à stabilisation, puis
+ * on balaie les accolades restées seules.
  */
 function labelFromTemplate(tpl) {
-  return String(tpl || "")
-    .replace(/\{[^}]*\}/g, " ")     // segments conditionnels
+  let s = String(tpl || "");
+  for (let pass = 0; pass < 12; pass++) {
+    const next = s.replace(/\{[^{}]*\}/g, " ");   // groupes les plus internes
+    if (next === s) break;
+    s = next;
+  }
+  return s
+    .replace(/[{}]/g, " ")          // accolades orphelines (imbrication impaire)
     .replace(/[#~]\d+/g, " ")       // marqueurs de valeurs
     .replace(/%\d+/g, " ")
     .replace(/^[\s+\-–]+/, " ")     // signe de tête
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * Résout la statistique agrégée d'un libellé, en tolérant le singulier et le
+ * pluriel : l'API écrit « Dommage » là où la table dit « Dommages ». Faire
+ * échouer la correspondance sur un « s » exclurait l'effet de tous les totaux.
+ */
+function statKeyForLabel(label) {
+  const n = normalize(label);
+  if (STAT_BY_LABEL[n]) return STAT_BY_LABEL[n];
+  const alt = n.endsWith("s") ? n.slice(0, -1) : `${n}s`;
+  return STAT_BY_LABEL[alt] ?? null;
+}
+
+/**
+ * Deux libellés désignent-ils le même effet ? La différence singulier/pluriel
+ * est une variation d'écriture, pas une divergence de sens : la signaler
+ * noierait les vraies divergences sous du bruit.
+ */
+function labelsMatch(a, b) {
+  const na = normalize(a), nb = normalize(b);
+  if (na === nb) return true;
+  return na.replace(/s$/, "") === nb.replace(/s$/, "");
 }
 
 class Reporter {
@@ -273,7 +314,7 @@ async function getJson(url, opts, reporter) {
  * Parcourt une collection paginée FeathersJS ($skip / $limit).
  * S'arrête dès que l'API cesse de progresser, pour ne jamais boucler.
  */
-async function fetchCollection(resource, query, opts, reporter, cap = Infinity) {
+async function fetchCollection(resource, query, opts, reporter, cap = Infinity, flags = {}) {
   const out = [];
   let skip = 0, total = null;
 
@@ -283,15 +324,17 @@ async function fetchCollection(resource, query, opts, reporter, cap = Infinity) 
     const rows = Array.isArray(page) ? page : page.data || [];
     if (total === null) {
       total = Array.isArray(page) ? rows.length : (page.total ?? rows.length);
-      reporter.info(`  ${resource} : ${Math.min(total, cap)} entrées à récupérer`);
+      if (!flags.silent) reporter.info(`  ${resource} : ${Math.min(total, cap)} entrées à récupérer`);
     }
     out.push(...rows);
     if (!rows.length || out.length >= total) break;
     skip += rows.length;
-    process.stdout.write(`\r  ${resource} : ${Math.min(out.length, cap)}/${Math.min(total, cap)}   `);
+    if (!flags.silent) {
+      process.stdout.write(`\r  ${resource} : ${Math.min(out.length, cap)}/${Math.min(total, cap)}   `);
+    }
     if (opts.delay) await sleep(opts.delay);
   }
-  process.stdout.write("\r\x1b[K");
+  if (!flags.silent) process.stdout.write("\r\x1b[K");
   return out.slice(0, cap);
 }
 
@@ -315,7 +358,7 @@ function buildEffectMap(rawEffects, opts, reporter) {
     let confidence;
     if (!label) confidence = "incertain";
     else if (expected === undefined) confidence = "probable";
-    else if (normalize(expected) === normalize(label)) confidence = "verifie";
+    else if (labelsMatch(expected, label)) confidence = "verifie";
     else {
       confidence = "incertain";
       disagreements.push(`effectId ${id} : API « ${label} » vs table « ${expected} »`);
@@ -327,7 +370,7 @@ function buildEffectMap(rawEffects, opts, reporter) {
       template,
       characteristic: e.characteristic ?? null,
       operator: e.operator ?? null,
-      statKey: STAT_BY_LABEL[normalize(label)] ?? null,
+      statKey: statKeyForLabel(label),
       confidence,
     };
   }
@@ -337,7 +380,7 @@ function buildEffectMap(rawEffects, opts, reporter) {
     if (!map[id]) {
       map[id] = {
         id: Number(id), label: expected, template: null, characteristic: null,
-        operator: null, statKey: STAT_BY_LABEL[normalize(expected)] ?? null,
+        operator: null, statKey: statKeyForLabel(expected),
         confidence: "incertain",
       };
       reporter.warn(`effectId ${id} (« ${expected} ») absent de /effects — conservé en « incertain »`);
@@ -469,10 +512,40 @@ async function main() {
   const rawEffects = await fetchCollection("effects", {}, opts, reporter);
   const effectMap = buildEffectMap(rawEffects, opts, reporter);
 
-  // 3. Objets, restreints aux types d'équipement.
-  const typeQuery = {};
-  equipmentTypeIds.forEach((id, i) => { typeQuery[`typeId[$in][${i}]`] = String(id); });
-  const rawItems = await fetchCollection("items", typeQuery, opts, reporter, opts.max);
+  // 3. Objets, interrogés UN TYPE À LA FOIS.
+  //
+  // Une requête unique filtrée par `typeId[$in][0..31]` fait répondre l'API en
+  // HTTP 500 : elle n'encaisse pas ce filtre groupé sur une trentaine de
+  // valeurs. On paie donc quelques requêtes de plus, mais chacune est une
+  // égalité simple, et surtout l'échec d'un type ne fait plus perdre toute
+  // l'extraction — il est signalé et le reste continue.
+  const rawItems = [];
+  const failedTypes = [];
+  for (const typeId of equipmentTypeIds) {
+    if (rawItems.length >= opts.max) break;
+    const remaining = opts.max === Infinity ? Infinity : opts.max - rawItems.length;
+    const typeName = pickText((typeById.get(typeId) || {}).name, opts.lang) || `#${typeId}`;
+    try {
+      const rows = await fetchCollection(
+        "items", { typeId: String(typeId) }, opts, reporter, remaining, { silent: true }
+      );
+      rawItems.push(...rows);
+      reporter.debug(`${typeName} (#${typeId}) : ${rows.length} objets`);
+    } catch (err) {
+      failedTypes.push({ typeId, typeName });
+      reporter.warn(`type « ${typeName} » (#${typeId}) non récupéré : ${err.message}`);
+    }
+    process.stdout.write(`\r  items : ${rawItems.length} récupérés   `);
+  }
+  process.stdout.write("\r\x1b[K");
+
+  // Aucun type récupéré : inutile d'écrire un jeu de données vide.
+  if (!rawItems.length) {
+    throw new Error(
+      `aucun objet récupéré (${failedTypes.length} type(s) en échec sur ${equipmentTypeIds.length}). `
+      + "L'API a-t-elle changé de schéma ?"
+    );
+  }
 
   const items = [];
   const slotCounts = {};
@@ -544,6 +617,12 @@ async function main() {
     reporter.info("");
     reporter.info(`Effets référencés par des objets mais absents de /effects : ${[...unknownEffectIds].join(", ")}`);
   }
+  if (failedTypes.length) {
+    reporter.info("");
+    reporter.info(`Types non récupérés (${failedTypes.length}/${equipmentTypeIds.length}) — les objets correspondants MANQUENT :`);
+    for (const f of failedTypes) reporter.info(`  ${f.typeName} (#${f.typeId})`);
+    reporter.info("  Relancer le script complète le jeu de données ; le cache (--cache) évite de tout retélécharger.");
+  }
   if (reporter.warnings.length) {
     reporter.info("");
     reporter.info(`${reporter.warnings.length} avertissement(s) — repris dans meta.warnings de items.json.`);
@@ -562,6 +641,7 @@ if (require.main === module) {
 
 module.exports = {
   normalize, pickText, labelFromTemplate, normalizeEffect,
+  statKeyForLabel, labelsMatch,
   slotForType, transformItem, transformSet, buildEffectMap,
   SLOT_CAPACITY, SLOT_BY_TYPE, STAT_BY_LABEL, EFFECT_CROSSCHECK,
 };

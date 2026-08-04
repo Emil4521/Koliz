@@ -23,7 +23,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { normalize, labelFromTemplate, STAT_BY_LABEL, SLOT_CAPACITY } = require("./fetch_items.js");
+const { labelFromTemplate, statKeyForLabel, SLOT_CAPACITY } = require("./fetch_items.js");
 
 const OUT_DIR = path.join(__dirname, "..", "client", "data");
 
@@ -156,7 +156,7 @@ function build() {
       template,
       characteristic: null,
       operator: "+",
-      statKey: STAT_BY_LABEL[normalize(label)] ?? null,
+      statKey: statKeyForLabel(label),
       confidence: "exemple",
     };
   }

@@ -18,22 +18,29 @@ const TYPES = [
 ];
 
 const EFFECTS = [
-  { id: 125, description: { fr: "+#1{~1~2 à }#2 Vitalité" }, characteristic: 11, operator: "+" },
-  { id: 118, description: { fr: "+#1{~1~2 à }#2 Force" }, characteristic: 10, operator: "+" },
+  // Gabarits à accolades IMBRIQUÉES, comme ceux renvoyés par la vraie API.
+  // Avec l'ancienne extraction ils produisaient « } Vitalité », « } Force »…
+  // — c'est la régression que ces entrées verrouillent.
+  { id: 125, description: { fr: "+#1{~1~2 à {#2}} Vitalité" }, characteristic: 11, operator: "+" },
+  { id: 118, description: { fr: "+#1{~1~2 à {#2}} Force" }, characteristic: 10, operator: "+" },
   { id: 123, description: { fr: "+#1{~1~2 à }#2 Chance" }, characteristic: 13, operator: "+" },
   { id: 119, description: { fr: "+#1{~1~2 à }#2 Agilité" }, characteristic: 14, operator: "+" },
   { id: 126, description: { fr: "+#1{~1~2 à }#2 Intelligence" }, characteristic: 15, operator: "+" },
   { id: 124, description: { fr: "+#1{~1~2 à }#2 Sagesse" }, characteristic: 12, operator: "+" },
-  { id: 111, description: { fr: "+#1{~1~2 à }#2 PA" }, characteristic: 1, operator: "+" },
+  { id: 111, description: { fr: "+#1{~1~2 à {#2}} PA" }, characteristic: 1, operator: "+" },
   { id: 128, description: { fr: "+#1{~1~2 à }#2 PM" }, characteristic: 23, operator: "+" },
-  { id: 112, description: { fr: "+#1{~1~2 à }#2 Dommages" }, characteristic: 16, operator: "+" },
-  { id: 115, description: { fr: "+#1{~1~2 à }#2 % Critique" }, characteristic: 18, operator: "+" },
-  { id: 138, description: { fr: "+#1{~1~2 à }#2 % Dommages" }, characteristic: 25, operator: "+" },
+  // Singulier côté API, pluriel côté table de recoupement : variation
+  // d'écriture, pas divergence de sens — doit rester « vérifié » et résoudre
+  // quand même vers domFixe.
+  { id: 112, description: { fr: "+#1{~1~2 à {#2}} Dommage" }, characteristic: 16, operator: "+" },
+  // Vraie divergence de sens, délibérée : la table attend « % Critique ».
+  { id: 115, description: { fr: "+#1{~1~2 à }#2 % Coup Critique" }, characteristic: 18, operator: "+" },
+  { id: 138, description: { fr: "+#1{~1~2 à }#2 Puissance" }, characteristic: 25, operator: "+" },
   { id: 210, description: { fr: "+#1{~1~2 à }#2 % Résistance Terre" }, characteristic: 36, operator: "+" },
   { id: 240, description: { fr: "+#1{~1~2 à }#2 Résistance Feu" }, characteristic: 41, operator: "+" },
-  // Divergence délibérée avec EFFECT_CROSSCHECK (158 attendu = "Soins")
-  { id: 158, description: { fr: "+#1{~1~2 à }#2 Prospection" }, characteristic: 26, operator: "+" },
-  // Effet sans statistique agrégée : doit rester affichable, non cumulé
+  // Hors table de recoupement : ressort en « probable ».
+  { id: 158, description: { fr: "+#1{~1~2 à }#2 Pod" }, characteristic: 26, operator: "+" },
+  // Effet sans statistique agrégée : affichable, non cumulé.
   { id: 400, description: { fr: "Rend l'objet Non Échangeable" }, characteristic: null, operator: null },
 ];
 
@@ -93,12 +100,12 @@ globalThis.fetch = async (input) => {
   else if (url.pathname === "/effects") rows = EFFECTS;
   else if (url.pathname === "/item-sets") rows = SETS;
   else if (url.pathname === "/items") {
-    const allowed = new Set(
-      [...url.searchParams.entries()]
-        .filter(([k]) => k.startsWith("typeId[$in]"))
-        .map(([, v]) => Number(v))
-    );
-    rows = allowed.size ? ITEMS.filter((i) => allowed.has(i.typeId)) : ITEMS;
+    // Le script interroge un type à la fois (`typeId=<id>`) : la requête
+    // groupée `typeId[$in][0..31]` fait répondre la vraie API en HTTP 500.
+    const groupe = [...url.searchParams.keys()].some((k) => k.startsWith("typeId[$in]"));
+    if (groupe) return { ok: false, status: 500, json: async () => ({ message: "filtre groupé refusé" }) };
+    const typeId = url.searchParams.get("typeId");
+    rows = typeId === null ? ITEMS : ITEMS.filter((i) => i.typeId === Number(typeId));
   } else {
     return { ok: false, status: 404, json: async () => ({}) };
   }
