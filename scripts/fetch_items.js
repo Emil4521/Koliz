@@ -105,6 +105,16 @@ const STAT_BY_LABEL = {
   "dommages pieges": "domPieges", "% dommages pieges": "domPctPieges",
   "renvoi de dommages": "renvoiDom", "vol de vie": "volVie",
 
+  // Caractéristiques relevées dans la table d'effets réelle. Le mappage se
+  // faisant par LIBELLÉ et l'agrégation ne portant que sur les effets
+  // réellement présents sur un objet, déclarer une clé qu'aucun équipement ne
+  // porte est sans conséquence — l'omettre, en revanche, perd la statistique.
+  "% dommages melee": "domPctMelee", "% dommages distance": "domPctDistance",
+  "% dommages d armes": "domPctArmes", "% dommages aux armes": "domPctArmes",
+  "% dommages aux sorts": "domPctSorts", "% dommages finaux": "domPctFinaux",
+  "% dommage poussee": "domPctPoussee",
+  "% erosion": "erosion",
+
   // Critiques
   "% critique": "critPct", "critique": "critPct", "coups critiques": "critPct",
   "% resistance critiques": "resCrit",
@@ -125,6 +135,9 @@ const STAT_BY_LABEL = {
   "resistance eau": "resFixeEau", "resistance air": "resFixeAir",
   "resistance neutre": "resFixeNeutre",
   "% resistance poussee": "resPoussee",
+
+  "% resistance melee": "resPctMelee", "% resistance distance": "resPctDistance",
+  "% resistance aux armes": "resPctArmes", "% resistance aux sorts": "resPctSorts",
 };
 
 /**
@@ -630,6 +643,7 @@ async function main() {
   const items = [];
   const slotCounts = {};
   const unknownEffectIds = new Set();
+  const nonAgreges = new Map();     // effectId -> nombre d'objets porteurs
   let mentionsEcartees = 0;
   for (const raw of rawItems) {
     const item = transformItem(raw, typeById, opts);
@@ -641,7 +655,11 @@ async function main() {
       return true;
     });
     if (!item.effects.length && item.slot !== "arme") continue;   // objet sans stat
-    for (const e of item.effects) if (!effectMap[e.effectId]) unknownEffectIds.add(e.effectId);
+    for (const e of item.effects) {
+      const def = effectMap[e.effectId];
+      if (!def) unknownEffectIds.add(e.effectId);
+      else if (!def.statKey) nonAgreges.set(e.effectId, (nonAgreges.get(e.effectId) || 0) + 1);
+    }
     slotCounts[item.slot] = (slotCounts[item.slot] || 0) + 1;
     items.push(item);
   }
@@ -720,6 +738,22 @@ async function main() {
     reporter.info("");
     reporter.info(`Effets référencés par des objets mais absents de /effects : ${[...unknownEffectIds].join(", ")}`);
   }
+  // La liste qui compte vraiment : les effets qu'un équipement porte sans
+  // qu'ils entrent dans un total. Chacun est soit une caractéristique à
+  // ajouter à STAT_BY_LABEL, soit une mention à écarter délibérément.
+  if (nonAgreges.size) {
+    reporter.info("");
+    reporter.info(`Effets portés par des objets mais NON cumulés (${nonAgreges.size}) :`);
+    const tri = [...nonAgreges.entries()].sort((a, b) => b[1] - a[1]);
+    for (const [effectId, count] of tri.slice(0, 40)) {
+      const def = effectMap[effectId];
+      reporter.info(`  ${String(count).padStart(5)} objets   id ${String(effectId).padStart(5)}   « ${def.label} »`);
+    }
+    if (tri.length > 40) reporter.info(`  … et ${tri.length - 40} autres`);
+    reporter.info("  Chacun est soit une caractéristique à ajouter à STAT_BY_LABEL,");
+    reporter.info("  soit une mention à écarter volontairement (cf. docs/effects.md).");
+  }
+
   if (failedTypes.length) {
     reporter.info("");
     reporter.info(`Types non récupérés (${failedTypes.length}/${equipmentTypeIds.length}) — les objets correspondants MANQUENT :`);

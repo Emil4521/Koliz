@@ -223,4 +223,23 @@ const LEVEL = { level: 200 };
   assert.notStrictEqual(build("A"), build("B"), "graines différentes → builds différents");
 }
 
+/* --- Invariant entre les deux modules --------------------------------------
+   `scripts/fetch_items.js` produit les `statKey`, `client/items.js` les agrège.
+   Une clé connue du premier mais pas du second ne provoque aucune erreur : elle
+   fait silencieusement basculer l'effet en « non cumulé ». C'est précisément le
+   genre de désynchronisation qu'on ne remarque qu'en relisant des totaux faux. */
+{
+  const { STAT_BY_LABEL } = require("../scripts/fetch_items.js");
+  const connues = new Set(I.ALL_STATS);
+  const orphelines = [...new Set(Object.values(STAT_BY_LABEL))].filter((k) => !connues.has(k));
+  assert.deepStrictEqual(orphelines, [],
+    `statKey produites par l'extraction mais inconnues de items.js : ${orphelines.join(", ")}`);
+
+  // Et l'inverse : une statistique affichée que rien ne peut jamais remplir.
+  const produites = new Set(Object.values(STAT_BY_LABEL));
+  const jamaisRemplies = I.ALL_STATS.filter((k) => !produites.has(k));
+  assert.deepStrictEqual(jamaisRemplies, [],
+    `statistiques affichées mais qu'aucun libellé ne produit : ${jamaisRemplies.join(", ")}`);
+}
+
 console.log("items.test.js : OK");

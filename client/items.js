@@ -96,6 +96,10 @@
         ["domArmes", "Dommages aux armes"], ["domPieges", "Dommages pièges"],
         ["domPctPieges", "% Dommages pièges"], ["renvoiDom", "Renvoi de dommages"],
         ["volVie", "Vol de vie"],
+        ["domPctMelee", "% Dommages mêlée"], ["domPctDistance", "% Dommages distance"],
+        ["domPctArmes", "% Dommages armes"], ["domPctSorts", "% Dommages sorts"],
+        ["domPctFinaux", "% Dommages finaux"], ["domPctPoussee", "% Dommages poussée"],
+        ["erosion", "% Érosion"],
       ],
     },
     {
@@ -108,6 +112,8 @@
         ["resFixeEau", "Rés. Eau"], ["resFixeAir", "Rés. Air"],
         ["resFixeNeutre", "Rés. Neutre"],
         ["resCrit", "Rés. critiques"], ["resPoussee", "% Rés. poussée"],
+        ["resPctMelee", "% Rés. mêlée"], ["resPctDistance", "% Rés. distance"],
+        ["resPctArmes", "% Rés. armes"], ["resPctSorts", "% Rés. sorts"],
       ],
     },
   ];

@@ -141,6 +141,49 @@ regénérés et toute édition manuelle serait perdue.
 
 ---
 
+## Distinctions à ne pas confondre
+
+Plusieurs caractéristiques portent des noms voisins tout en étant **séparées**
+dans le jeu. Elles le sont aussi dans le code, chacune ayant sa propre
+`statKey` — la tolérance singulier/pluriel du mappage ne les fusionne pas, ce
+qui est explicitement vérifié par les tests.
+
+| Libellé | `statKey` | Nature |
+|---|---|---|
+| `% Critique` | `critPct` | Probabilité de coup critique |
+| `Dommages Critiques` | `domCrit` | Dommages ajoutés **lorsque** le coup est critique |
+| `Résistance Critiques` | `resCrit` | Réduction des dommages critiques subis |
+| `Dommages` | `domFixe` | Dommages fixes, tous éléments |
+| `% Dommages` | `domPct` | Multiplicateur de dommages |
+| `Puissance` | `puissance` | S'ajoute à la caractéristique élémentaire |
+
+> **Note pour la formule de dégâts (v1.0)** — les `Dommages Critiques`
+> s'appliquent **en fin de calcul**, après les multiplicateurs, et non au niveau
+> des dommages de base. À confirmer contre le jeu avant d'implémenter la
+> formule : l'ordre d'application change le résultat.
+
+### Référence externe
+
+Le site **dofus-stuffer.is-great.net** est une bonne référence pour la liste
+complète des caractéristiques d'équipement. Il n'a pas pu être consulté depuis
+l'environnement de développement (egress bloqué, HTTP 403) : la liste actuelle
+est donc dérivée des **libellés réels renvoyés par l'API**, complétée à mesure
+que les extractions révèlent des effets non cumulés.
+
+C'est le rôle du bloc « Effets portés par des objets mais NON cumulés » affiché
+en fin d'extraction : il donne, avec le nombre d'objets porteurs, la liste
+exacte de ce qui reste à trancher. Une extraction **complète** (sans `--max`)
+produit la liste définitive.
+
+Chaque entrée y est soit une caractéristique à ajouter à `STAT_BY_LABEL`, soit
+une mention à écarter volontairement. Sont déjà classées comme non
+agrégeables : les lignes de dégâts d'arme (`vol Eau`, `vol Air`, …), qui sont
+des propriétés de l'attaque et non du personnage, ainsi que `Attitude`,
+`Arme de chasse` et `Vole Kamas`, qui ne sont pas des caractéristiques de
+combat.
+
+---
+
 ## Limite connue : conditions d'utilisation
 
 Le champ `criteria` des objets (chaînes du type `CS>20&PL<50`) est **conservé
