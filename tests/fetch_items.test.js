@@ -20,6 +20,64 @@ const ROOT = path.join(__dirname, "..");
 const SCRIPT = path.join(ROOT, "scripts", "fetch_items.js");
 const MOCK = path.join(__dirname, "mock-api.js");
 
+/* --- Résolution des libellés : cas relevés dans une extraction réelle -------
+   L'API écrit « Dommage Air » quand la table dit « Dommages Air » : le « s »
+   est au PREMIER mot. Une tolérance limitée à la fin de chaîne laissait ces
+   effets hors de tous les totaux, sans rien signaler. */
+{
+  const { statKeyForLabel, labelsMatch } = require("../scripts/fetch_items.js");
+
+  const attendus = {
+    "Dommage Air": "domAir", "Dommage Critiques": "domCrit", "Soin": "soins",
+    "Invocation": "invocations", "Tacle": "tacle", "Portée": "po",
+    "% Critique": "critPct", "Vitalité": "vitalite", "PA": "pa",
+    "Dommage Terre": "domTerre", "% Résistance Terre": "resPctTerre",
+    "Résistance Feu": "resFixeFeu", "Vol de vie": "volVie",
+  };
+  for (const [label, key] of Object.entries(attendus)) {
+    assert.strictEqual(statKeyForLabel(label), key, `« ${label} » doit résoudre vers ${key}`);
+  }
+
+  // La tolérance ne doit pas fusionner des effets réellement distincts.
+  assert.ok(!labelsMatch("Dommage Air", "Dommage Feu"), "les éléments restent distincts");
+  assert.ok(!labelsMatch("Force", "Fuite"), "deux stats proches restent distinctes");
+  assert.ok(!labelsMatch("% Critique", "% Coup Critique"), "une vraie divergence reste signalée");
+  assert.ok(labelsMatch("Soin", "Soins"), "singulier et pluriel équivalents");
+  assert.ok(labelsMatch("Dommages Critiques", "Dommage Critiques"), "pluriel sur le premier mot");
+}
+
+/* --- Panoplies : les deux formes de schéma acceptées -----------------------
+   Une extraction réelle a rendu zéro panoplie exploitable : le champ des
+   paliers ne porte pas toujours le même nom ni la même forme. */
+{
+  const { transformSet } = require("../scripts/fetch_items.js");
+  const opts = { lang: "fr" };
+
+  // Forme tableau : l'indice 0 correspond au palier « 2 pièces ».
+  const tableau = transformSet({
+    id: 1, name: { fr: "P" }, items: [1, 2],
+    effects: [[{ effectId: 125, diceNum: 10, diceSide: 0 }], []],
+  }, opts);
+  assert.deepStrictEqual(tableau.bonuses, { 2: [{ effectId: 125, value: 10 }] }, "forme tableau");
+
+  // Forme objet : la clé EST le nombre de pièces.
+  const objet = transformSet({
+    id: 2, name: { fr: "Q" }, items: [3, 4],
+    effects: { 3: [{ effectId: 118, diceNum: 15, diceSide: 0 }] },
+  }, opts);
+  assert.deepStrictEqual(objet.bonuses, { 3: [{ effectId: 118, value: 15 }] }, "forme objet");
+
+  // Champ nommé autrement.
+  const alt = transformSet({
+    id: 3, name: { fr: "R" }, items: [5],
+    bonuses: [[{ effectId: 128, diceNum: 1, diceSide: 0 }]],
+  }, opts);
+  assert.deepStrictEqual(alt.bonuses, { 2: [{ effectId: 128, value: 1 }] }, "champ alternatif");
+
+  // Absence totale de paliers : ni exception, ni bonus inventé.
+  assert.deepStrictEqual(transformSet({ id: 4, name: { fr: "S" } }, opts).bonuses, {}, "aucun palier");
+}
+
 const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "kolizeum-fetch-"));
 
 // Une taille de page volontairement petite force plusieurs tours de pagination.

@@ -234,15 +234,27 @@ function labelFromTemplate(tpl) {
 }
 
 /**
- * Résout la statistique agrégée d'un libellé, en tolérant le singulier et le
- * pluriel : l'API écrit « Dommage » là où la table dit « Dommages ». Faire
- * échouer la correspondance sur un « s » exclurait l'effet de tous les totaux.
+ * Ramène chaque MOT au singulier. La tolérance doit être mot à mot, pas
+ * seulement en fin de chaîne : l'API écrit « Dommage Air » là où la table dit
+ * « Dommages Air », et le « s » est au premier mot. Une comparaison sur la
+ * seule terminaison laissait ces effets hors de tous les totaux.
  */
+function singularize(n) {
+  return n
+    .split(" ")
+    .map((w) => (w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w))
+    .join(" ");
+}
+
+/** Index des libellés au singulier, construit une fois. */
+const STAT_INDEX = new Map(
+  Object.entries(STAT_BY_LABEL).map(([label, key]) => [singularize(normalize(label)), key])
+);
+
+/** Résout la statistique agrégée d'un libellé. */
 function statKeyForLabel(label) {
   const n = normalize(label);
-  if (STAT_BY_LABEL[n]) return STAT_BY_LABEL[n];
-  const alt = n.endsWith("s") ? n.slice(0, -1) : `${n}s`;
-  return STAT_BY_LABEL[alt] ?? null;
+  return STAT_BY_LABEL[n] ?? STAT_INDEX.get(singularize(n)) ?? null;
 }
 
 /**
@@ -252,8 +264,7 @@ function statKeyForLabel(label) {
  */
 function labelsMatch(a, b) {
   const na = normalize(a), nb = normalize(b);
-  if (na === nb) return true;
-  return na.replace(/s$/, "") === nb.replace(/s$/, "");
+  return na === nb || singularize(na) === singularize(nb);
 }
 
 class Reporter {
@@ -461,20 +472,34 @@ function transformItem(raw, typeById, opts) {
   return item;
 }
 
-/** Normalise une panoplie : bonus indexés par nombre de pièces équipées. */
+/**
+ * Normalise une panoplie : bonus indexés par nombre de pièces équipées.
+ *
+ * Le champ portant les paliers n'a pas le même nom selon les versions de l'API,
+ * et se présente tantôt comme un tableau de tableaux (indice 0 ⇒ 2 pièces),
+ * tantôt comme un objet indexé par le nombre de pièces. On accepte les deux
+ * plutôt que de rendre zéro panoplie en silence.
+ */
 function transformSet(raw, opts) {
   const bonuses = {};
-  const levels = raw.effects || [];
-  levels.forEach((list, index) => {
-    const pieces = index + 2;            // effects[0] correspond à 2 pièces
+
+  const source = raw.effects || raw.bonuses || raw.itemSetBonus || null;
+  const entries = Array.isArray(source)
+    // Tableau : l'indice 0 correspond au palier « 2 pièces ».
+    ? source.map((list, index) => [index + 2, list])
+    // Objet : la clé EST le nombre de pièces.
+    : Object.entries(source || {}).map(([pieces, list]) => [Number(pieces), list]);
+
+  for (const [pieces, list] of entries) {
+    if (!Number.isFinite(pieces) || !Array.isArray(list)) continue;
     const parsed = [];
-    for (const rawEffect of list || []) {
+    for (const rawEffect of list) {
       const e = normalizeEffect(rawEffect);
       // Un bonus de panoplie est une valeur fixe, jamais un jet.
       if (e) parsed.push({ effectId: e.effectId, value: e.max });
     }
     if (parsed.length) bonuses[pieces] = parsed;
-  });
+  }
 
   return {
     id: raw.id,
@@ -519,21 +544,48 @@ async function main() {
   // valeurs. On paie donc quelques requêtes de plus, mais chacune est une
   // égalité simple, et surtout l'échec d'un type ne fait plus perdre toute
   // l'extraction — il est signalé et le reste continue.
+  //
+  // `--max` est un budget RÉPARTI entre les types, non un plafond global
+  // appliqué dans l'ordre : sinon un petit budget se vide entièrement sur le
+  // premier type et ne produit que des amulettes — un jeu de données inutile
+  // pour tester une interface d'équipement.
+  const perTypeCap = opts.max === Infinity
+    ? Infinity
+    : Math.max(1, Math.ceil(opts.max / equipmentTypeIds.length));
+  if (perTypeCap !== Infinity) {
+    reporter.info(`  budget : ${opts.max} objets, soit ${perTypeCap} par type sur ${equipmentTypeIds.length}`);
+  }
+
   const rawItems = [];
   const failedTypes = [];
+  // Coupe-circuit : poursuivre malgré les échecs évite de tout perdre, mais si
+  // l'API est en panne ou limite le débit, chaque type coûte le cycle complet
+  // de reprises. Enchaîner 32 fois ce cycle fait expirer le job sans rien
+  // produire d'exploitable. Au-delà de quelques échecs d'affilée, on s'arrête
+  // et on rend ce qui a été collecté.
+  const MAX_ECHECS_CONSECUTIFS = 4;
+  let echecsConsecutifs = 0;
+
   for (const typeId of equipmentTypeIds) {
-    if (rawItems.length >= opts.max) break;
-    const remaining = opts.max === Infinity ? Infinity : opts.max - rawItems.length;
     const typeName = pickText((typeById.get(typeId) || {}).name, opts.lang) || `#${typeId}`;
     try {
       const rows = await fetchCollection(
-        "items", { typeId: String(typeId) }, opts, reporter, remaining, { silent: true }
+        "items", { typeId: String(typeId) }, opts, reporter, perTypeCap, { silent: true }
       );
       rawItems.push(...rows);
+      echecsConsecutifs = 0;
       reporter.debug(`${typeName} (#${typeId}) : ${rows.length} objets`);
     } catch (err) {
       failedTypes.push({ typeId, typeName });
+      echecsConsecutifs++;
       reporter.warn(`type « ${typeName} » (#${typeId}) non récupéré : ${err.message}`);
+      if (echecsConsecutifs >= MAX_ECHECS_CONSECUTIFS) {
+        reporter.warn(
+          `${echecsConsecutifs} échecs consécutifs — arrêt de la récupération des objets. `
+          + "L'API semble indisponible ; réessayer plus tard."
+        );
+        break;
+      }
     }
     process.stdout.write(`\r  items : ${rawItems.length} récupérés   `);
   }
@@ -562,6 +614,21 @@ async function main() {
   // 4. Panoplies.
   const rawSets = await fetchCollection("item-sets", {}, opts, reporter);
   const sets = rawSets.map((s) => transformSet(s, opts)).filter((s) => Object.keys(s.bonuses).length);
+
+  // Auto-diagnostic : des panoplies récupérées mais aucun bonus lisible signale
+  // un schéma différent de celui attendu. Plutôt que de rendre zéro panoplie en
+  // silence, on expose la forme reçue — le prochain run suffit alors à corriger
+  // `transformSet` sans avoir à interroger l'API à la main.
+  if (rawSets.length && !sets.length) {
+    const sample = rawSets[0];
+    reporter.warn(
+      `${rawSets.length} panoplies récupérées, aucune avec des bonus exploitables. `
+      + `Champs reçus : ${Object.keys(sample).join(", ")}`
+    );
+    reporter.info("");
+    reporter.info("Forme brute de la première panoplie (tronquée) — à reporter dans transformSet :");
+    reporter.info(`  ${JSON.stringify(sample).slice(0, 800)}`);
+  }
 
   // 5. Écriture.
   const payload = {
