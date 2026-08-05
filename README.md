@@ -111,8 +111,21 @@ de [nodejs.org](https://nodejs.org).
 - **Panoplies** détectées automatiquement, avec palier atteint et bonus appliqué.
 - **Points de caractéristiques** : 5 par niveau du 2 au 200, soit 995 au niveau
   200, à répartir entre vitalité, sagesse, force, intelligence, chance et
-  agilité. Le coût du prochain point est affiché, les paliers sont appliqués et
-  le budget ne peut pas être dépassé.
+  agilité. La valeur se saisit directement au clavier ; une valeur hors budget
+  est ramenée au maximum atteignable plutôt que refusée. Le coût du prochain
+  point est affiché en permanence.
+
+  | Caractéristique | Coût |
+  |---|---|
+  | Vitalité | 1 pour 1, sans palier |
+  | Sagesse | 3 pour 1, sans palier |
+  | Force, Intelligence, Chance, Agilité | 1 pour 1 jusqu'à 100, puis 2, puis 3, puis 4 au-delà de 300 |
+
+  Soit, au niveau 200 : **995** en vitalité, **331** en sagesse, **398** en
+  élémentaire.
+- **Parchemins** : une case porte les quatre éléments à 101 sans dépenser un
+  point. Ces 101 **n'entrent pas dans le calcul des paliers** — le coût du
+  prochain point suit la seule valeur achetée avec des points.
 - **Forgemagie** : modifier la valeur de n'importe quelle ligne d'un objet
   équipé, ou lui ajouter une ligne exotique. Le dépassement des bornes
   officielles est signalé, jamais interdit — c'est un outil de théorycraft, pas
@@ -150,17 +163,11 @@ niveau viennent de l'équipement. La fidélité mécanique étant l'objectif pre
 
 Sont également marquées « à confirmer » dans le code, faute de source
 vérifiable hors ligne : les points de vie de base (55 au niveau 1, +5 par
-niveau), le caractère **non cumulatif** des paliers de panoplie (4 pièces ⇒
-bonus « 4 pièces » seul, et non la somme des paliers), et le **barème des
-points de caractéristiques**.
+niveau) et le caractère **non cumulatif** des paliers de panoplie (4 pièces ⇒
+bonus « 4 pièces » seul, et non la somme des paliers).
 
-Ce barème reprend la table classique de Dofus — 1 point jusqu'à 100, puis 2, 3,
-4 et 5 par tranche de 100 pour les caractéristiques élémentaires ; 1 pour la
-vitalité et 3 pour la sagesse, sans palier. Il donne 995 en vitalité, 331 en
-sagesse et 398 en élémentaire au niveau 200, ce qui concorde avec les valeurs
-connues, mais n'a pas pu être recoupé contre une source de référence
-(`dofus-stuffer.is-great.net` est inaccessible depuis l'environnement de
-développement). Tout se corrige dans la constante `STAT_POINT_COSTS`.
+Le barème des points de caractéristiques, lui, a été confirmé et n'est plus une
+hypothèse.
 
 ### Limites connues
 

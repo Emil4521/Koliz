@@ -237,7 +237,9 @@ const LEVEL = { level: 200 };
   assert.strictEqual(I.costOfNextPoint("force", 100), 2, "2 points au-delà de 100");
   assert.strictEqual(I.costOfNextPoint("force", 200), 3, "3 points au-delà de 200");
   assert.strictEqual(I.costOfNextPoint("force", 300), 4, "4 points au-delà de 300");
-  assert.strictEqual(I.costOfNextPoint("force", 400), 5, "5 points au-delà de 400");
+  // Le barème s'arrête à 4 : il n'existe pas de cinquième palier.
+  assert.strictEqual(I.costOfNextPoint("force", 400), 4, "toujours 4 au-delà de 400");
+  assert.strictEqual(I.costOfNextPoint("force", 999), 4, "le dernier palier est ouvert");
 
   // Vitalité et sagesse ont un coût constant.
   assert.strictEqual(I.costOfNextPoint("vitalite", 500), 1, "vitalité toujours à 1");
@@ -275,6 +277,60 @@ const LEVEL = { level: 200 };
   assert.strictEqual(I.refundPoints(r, "force", 50), 50, "50 points rendus");
   assert.strictEqual(r.force, 100, "force ramenée à 100");
   assert.strictEqual(I.refundPoints(r, "force", 9999), 100, "on ne descend pas sous zéro");
+}
+
+/* --- Saisie directe d'une valeur ------------------------------------------- */
+{
+  const d = I.createDistribution();
+
+  assert.strictEqual(I.setPoints(d, "force", 250, 200), 250, "valeur saisie appliquée");
+  assert.strictEqual(I.pointsSpent(d), 100 + 200 + 150, "coût des trois paliers");
+
+  // Une valeur hors budget est ramenée au maximum atteignable, pas refusée.
+  const reste = 995 - I.pointsSpent(d);
+  const obtenu = I.setPoints(d, "chance", 9999, 200);
+  assert.strictEqual(obtenu, I.maxAffordable("chance", reste), "ramené au maximum possible");
+  assert.ok(I.pointsSpent(d) <= 995, "budget jamais dépassé");
+
+  // Redescendre libère les points.
+  I.setPoints(d, "force", 50, 200);
+  assert.strictEqual(d.force, 50, "valeur redescendue");
+
+  // Une valeur négative ou absurde retombe à zéro.
+  assert.strictEqual(I.setPoints(d, "force", -20, 200), 0, "pas de valeur négative");
+
+  // Maximums atteignables, barème corrigé.
+  assert.strictEqual(I.maxAffordable("vitalite", 995), 995, "vitalité 1 pour 1");
+  assert.strictEqual(I.maxAffordable("sagesse", 995), 331, "sagesse 3 pour 1");
+  assert.strictEqual(I.maxAffordable("force", 995), 398, "élémentaire par paliers");
+}
+
+/* --- Parchemins ------------------------------------------------------------ */
+{
+  const lo = I.createLoadout();
+  lo.scrolled = true;
+
+  let s = I.computeStats(lo, data, LEVEL);
+  for (const stat of I.SCROLLED_STATS) {
+    assert.strictEqual(s.fromScrolls[stat], I.SCROLL_VALUE, `${stat} parchotée`);
+    assert.strictEqual(s.total[stat], I.SCROLL_VALUE, `${stat} totale sans points`);
+  }
+  assert.strictEqual(s.fromScrolls.vitalite, 0, "la vitalité n'est pas parchotée");
+  assert.strictEqual(s.fromScrolls.sagesse, 0, "la sagesse n'est pas parchotée");
+  assert.strictEqual(s.points.spent, 0, "les parchemins ne coûtent aucun point");
+
+  // Le point crucial : les 101 des parchemins n'entrent PAS dans les paliers.
+  I.setPoints(lo.distribution, "force", 100, 200);
+  s = I.computeStats(lo, data, LEVEL);
+  assert.strictEqual(s.points.spent, 100, "100 points achetés au tarif du premier palier");
+  assert.strictEqual(s.total.force, 100 + I.SCROLL_VALUE, "total force = points + parchemins");
+  assert.strictEqual(I.costOfNextPoint("force", lo.distribution.force), 2,
+    "le palier suit la valeur ACHETÉE, pas le total affiché");
+
+  // Sans parchotage, rien n'est ajouté.
+  lo.scrolled = false;
+  s = I.computeStats(lo, data, LEVEL);
+  assert.strictEqual(s.total.force, 100, "sans parchemins, seuls les points comptent");
 }
 
 /* --- Les points alimentent les statistiques -------------------------------- */
@@ -343,6 +399,7 @@ const LEVEL = { level: 200 };
 {
   const lo = I.createLoadout();
   I.spendPoints(lo.distribution, "chance", 120, 200);
+  lo.scrolled = true;
   const res = I.equip(lo, item(1), { quality: 1 });
   I.setEffectValue(res.entry, 125, 777);
   I.addExoticEffect(res.entry, item(1), 111, 1);
@@ -353,6 +410,7 @@ const LEVEL = { level: 200 };
 
   assert.strictEqual(apres, avant, "aller-retour conservant points et forge");
   assert.strictEqual(round.distribution.chance, 120, "répartition restaurée");
+  assert.strictEqual(round.scrolled, true, "parchotage restauré");
   assert.deepStrictEqual(round.slots.coiffe[0].exotic, [111], "ligne exotique restaurée");
 
   // Un build antérieur, sans répartition, ne doit pas inventer de points.

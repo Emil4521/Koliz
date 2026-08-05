@@ -51,7 +51,7 @@
   /* ---------- Colonnes ---------- */
   #cols { flex: 1 1 auto; display: flex; min-height: 0; }
   .col { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-  #colSlots { flex: 0 0 350px; border-right: 1px solid var(--line); }
+  #colSlots { flex: 0 0 366px; border-right: 1px solid var(--line); }
   #colCatalog { flex: 1 1 auto; border-right: 1px solid var(--line); }
   #colStats { flex: 0 0 348px; }
   .col > h2 {
@@ -114,7 +114,8 @@
   #points .body { padding: 6px 9px; }
   .prow { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
   .prow .name { flex: 1 1 auto; color: var(--muted); }
-  .prow .val { font: 12px ui-monospace, monospace; min-width: 34px; text-align: right; }
+  .prow .val { font: 12px ui-monospace, monospace; min-width: 46px; text-align: right; color: var(--accent); }
+  .prow input[type=number] { width: 62px; padding: 2px 5px; font: 12px ui-monospace, monospace; text-align: right; }
   .prow .cost { font: 10px ui-monospace, monospace; color: #5c6577; min-width: 40px; text-align: right; }
   .prow button { padding: 0 5px; font: 11px ui-monospace, monospace; }
   .prow button:disabled { opacity: .35; cursor: default; border-color: var(--line); }
@@ -360,28 +361,45 @@ function renderPoints() {
   const head = el("div", "head");
   head.appendChild(el("span", "left", "Points de caractéristiques"));
   const rem = el("span", "rem" + (restants === 0 ? " none" : ""), `${restants} / ${dispo}`);
-  rem.title = `${depenses} points dépensés au niveau ${state.level}`;
+  rem.title = `${depenses} points dépensés au niveau ${state.level} — il reste ${restants} à attribuer`;
   head.appendChild(rem);
   box.appendChild(head);
 
   const body = el("div", "body");
+  const parchotte = Boolean(state.loadout.scrolled);
+
   for (const stat of Items.POINT_STATS) {
     const valeur = dist[stat] || 0;
     const prix = Items.costOfNextPoint(stat, valeur);
+    const bonus = parchotte && Items.SCROLLED_STATS.includes(stat) ? Items.SCROLL_VALUE : 0;
+
     const row = el("div", "prow");
     row.appendChild(el("span", "name", statLabel(stat)));
-    row.appendChild(el("span", "val", String(valeur)));
+
+    // Saisie directe : on tape la valeur voulue plutôt que d'empiler les clics.
+    const champ = el("input");
+    champ.type = "number";
+    champ.min = "0";
+    champ.value = String(valeur);
+    champ.title = "Points attribués à cette caractéristique";
+    champ.addEventListener("change", () => {
+      Items.setPoints(dist, stat, champ.value, state.level);
+      render();
+    });
+    row.appendChild(champ);
+
+    // Ce que le parchotage ajoute par-dessus, sans coûter de point.
+    const tot = el("span", "val", bonus ? `= ${valeur + bonus}` : "");
+    if (bonus) tot.title = `${valeur} par points + ${bonus} par parchemins`;
+    row.appendChild(tot);
 
     const cout = el("span", "cost", `${prix} pt${prix > 1 ? "s" : ""}`);
     cout.title = "Coût du prochain point";
     row.appendChild(cout);
 
-    for (const [texte, delta] of [["−10", -10], ["−1", -1], ["+1", 1], ["+10", 10]]) {
+    for (const [texte, delta] of [["−10", -10], ["+10", 10]]) {
       const b = el("button", null, texte);
-      const possible = delta < 0
-        ? valeur > 0
-        : Items.costOfNextPoint(stat, valeur) <= restants;
-      b.disabled = !possible;
+      b.disabled = delta < 0 ? valeur === 0 : prix > restants;
       b.addEventListener("click", () => {
         if (delta < 0) Items.refundPoints(dist, stat, -delta);
         else Items.spendPoints(dist, stat, delta, state.level);
@@ -392,8 +410,25 @@ function renderPoints() {
     body.appendChild(row);
   }
 
+  // --- Parchemins ---
+  const ligneParch = el("label", "check");
+  ligneParch.style.cssText = "display:flex; align-items:center; gap:7px; margin:8px 0 6px; cursor:pointer";
+  const caseParch = el("input");
+  caseParch.type = "checkbox";
+  caseParch.checked = parchotte;
+  caseParch.style.accentColor = "var(--accent)";
+  caseParch.addEventListener("change", () => {
+    state.loadout.scrolled = caseParch.checked;
+    render();
+  });
+  ligneParch.appendChild(caseParch);
+  const texteParch = el("span", "muted",
+    `Parchemins : +${Items.SCROLL_VALUE} dans les 4 éléments`);
+  texteParch.title = "Ces points ne coûtent rien et n'entrent pas dans le calcul des paliers.";
+  ligneParch.appendChild(texteParch);
+  body.appendChild(ligneParch);
+
   const reset = el("button", null, "Réinitialiser la répartition");
-  reset.style.marginTop = "4px";
   reset.addEventListener("click", () => {
     state.loadout.distribution = Items.createDistribution();
     render();
@@ -568,7 +603,7 @@ function renderCatalog() {
 function renderStats() {
   const body = $("statsBody");
   body.textContent = "";
-  const s = Items.computeStats(state.loadout, state.data, { level: state.level, distribution: state.loadout.distribution });
+  const s = Items.computeStats(state.loadout, state.data, { level: state.level, distribution: state.loadout.distribution, scrolled: state.loadout.scrolled });
 
   // Vie
   const life = el("div", "life");

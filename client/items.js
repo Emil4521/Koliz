@@ -130,10 +130,7 @@
      valeur DÉJÀ ACHETÉE avec des points, sans compter l'équipement : un objet
      ne rend jamais les points suivants plus chers.
 
-     ATTENTION — table à confirmer. Elle reprend le barème classique de Dofus,
-     mais n'a pas pu être recoupée contre une source de référence depuis
-     l'environnement de développement (egress bloqué). C'est le seul endroit à
-     corriger si le barème diffère.
+     Barème confirmé par l'auteur du projet.
      ======================================================================== */
 
   const POINTS_PER_LEVEL = 5;
@@ -145,15 +142,31 @@
   /**
    * Paliers de coût. Chaque entrée vaut « jusqu'à `upTo` inclus, un point de
    * caractéristique coûte `cost` points ». Le dernier palier est ouvert.
+   *
+   *   Vitalité      aucun palier, 1 pour 1
+   *   Sagesse       aucun palier, 3 pour 1
+   *   Élémentaires  1 pour 1 jusqu'à 100, puis 2, puis 3, puis 4 au-delà de 300
    */
   const STAT_POINT_COSTS = {
     vitalite: [{ upTo: Infinity, cost: 1 }],
     sagesse: [{ upTo: Infinity, cost: 3 }],
     force: [
-      { upTo: 100, cost: 1 }, { upTo: 200, cost: 2 }, { upTo: 300, cost: 3 },
-      { upTo: 400, cost: 4 }, { upTo: Infinity, cost: 5 },
+      { upTo: 100, cost: 1 }, { upTo: 200, cost: 2 },
+      { upTo: 300, cost: 3 }, { upTo: Infinity, cost: 4 },
     ],
   };
+
+  /**
+   * Parchemins de caractéristique. Dans le jeu, on peut « se parchotter » pour
+   * porter chaque élément à 101 sans dépenser un seul point.
+   *
+   * Ces 101 points N'ENTRENT PAS dans le calcul des paliers : le coût du
+   * prochain point se calcule sur la seule valeur achetée avec des points. Un
+   * personnage parchotté qui monte sa force à 100 par points paie donc bien
+   * 1 point par point, pour un total affiché de 201.
+   */
+  const SCROLL_VALUE = 101;
+  const SCROLLED_STATS = ["force", "intelligence", "chance", "agilite"];
   // Les quatre caractéristiques élémentaires partagent le même barème.
   STAT_POINT_COSTS.intelligence = STAT_POINT_COSTS.force;
   STAT_POINT_COSTS.chance = STAT_POINT_COSTS.force;
@@ -228,6 +241,52 @@
     const avant = distribution[stat] || 0;
     distribution[stat] = Math.max(0, avant - count);
     return avant - distribution[stat];
+  }
+
+  /** Valeur maximale atteignable dans une caractéristique avec `budget` points. */
+  function maxAffordable(stat, budget) {
+    const tiers = STAT_POINT_COSTS[stat];
+    if (!tiers || budget <= 0) return 0;
+    let valeur = 0, reste = budget, lower = 0;
+    for (const tier of tiers) {
+      const largeur = tier.upTo === Infinity ? Infinity : tier.upTo - lower;
+      const abordable = Math.floor(reste / tier.cost);
+      const pris = Math.min(largeur, abordable);
+      valeur += pris;
+      reste -= pris * tier.cost;
+      lower = tier.upTo;
+      if (pris < largeur) break;
+    }
+    return valeur;
+  }
+
+  /**
+   * Fixe directement la valeur d'une caractéristique — saisie au clavier plutôt
+   * qu'à coups de « +10 ». La valeur est ramenée à ce que le budget permet
+   * plutôt que refusée : on obtient le maximum atteignable, ce qui est
+   * l'information utile.
+   *
+   * Retourne la valeur réellement appliquée.
+   */
+  function setPoints(distribution, stat, target, level) {
+    if (!POINT_STATS.includes(stat)) return 0;
+    const cible = Math.max(0, Math.round(Number(target) || 0));
+
+    // Budget disponible en ignorant ce qui est déjà investi dans CETTE
+    // caractéristique, puisqu'on la redéfinit entièrement.
+    const sansStat = { ...distribution, [stat]: 0 };
+    const budget = pointsAvailable(level) - pointsSpent(sansStat);
+
+    distribution[stat] = Math.min(cible, maxAffordable(stat, budget));
+    return distribution[stat];
+  }
+
+  /** Apport des parchemins, indépendant des points dépensés. */
+  function scrollBonus(scrolled) {
+    const out = {};
+    for (const stat of POINT_STATS) out[stat] = 0;
+    if (scrolled) for (const stat of SCROLLED_STATS) out[stat] = SCROLL_VALUE;
+    return out;
   }
 
   /* ========================================================================
@@ -340,7 +399,7 @@
   function createLoadout() {
     const slots = {};
     for (const slot of SLOT_ORDER) slots[slot] = [];
-    return { slots, distribution: createDistribution() };
+    return { slots, distribution: createDistribution(), scrolled: false };
   }
 
   function equippedEntries(loadout) {
@@ -539,6 +598,15 @@
     const fromPoints = emptyStats();
     for (const stat of POINT_STATS) fromPoints[stat] = distribution[stat] || 0;
 
+    // Parchemins : comptés à part, car ils s'ajoutent au total SANS entrer dans
+    // le calcul des paliers de coût.
+    const scrolled = char.scrolled != null
+      ? char.scrolled
+      : Boolean(loadout && loadout.scrolled);
+    const bonusParchemins = scrollBonus(scrolled);
+    const fromScrolls = emptyStats();
+    for (const stat of POINT_STATS) fromScrolls[stat] = bonusParchemins[stat];
+
     const fromItems = emptyStats();
     const fromSets = emptyStats();
     const unaggregated = [];
@@ -573,7 +641,7 @@
 
     const total = emptyStats();
     for (const key of ALL_STATS) {
-      total[key] = base[key] + fromPoints[key] + fromItems[key] + fromSets[key];
+      total[key] = base[key] + fromPoints[key] + fromScrolls[key] + fromItems[key] + fromSets[key];
     }
 
     const vieBase = BASE_CHARACTER.vieBase + (level - 1) * BASE_CHARACTER.viePerLevel;
@@ -586,7 +654,12 @@
     };
     points.remaining = points.available - points.spent;
 
-    return { level, base, fromPoints, fromItems, fromSets, total, life, sets, points, unaggregated };
+    points.scrolled = scrolled;
+
+    return {
+      level, base, fromPoints, fromScrolls, fromItems, fromSets,
+      total, life, sets, points, unaggregated,
+    };
   }
 
   /* ========================================================================
@@ -639,6 +712,7 @@
       v: 2,
       character: { level: (character && character.level) || 200 },
       distribution: { ...(loadout.distribution || createDistribution()) },
+      scrolled: Boolean(loadout.scrolled),
       slots: Object.fromEntries(
         SLOT_ORDER.map((slot) => [slot, loadout.slots[slot].map((e) => ({
           itemId: e.itemId,
@@ -655,6 +729,7 @@
 
     // Les builds antérieurs à la v2 n'ont pas de répartition : on repart de
     // zéro plutôt que d'inventer des points.
+    loadout.scrolled = Boolean(payload.scrolled);
     if (payload.distribution) {
       for (const stat of POINT_STATS) {
         loadout.distribution[stat] = Math.max(0, Math.round(Number(payload.distribution[stat]) || 0));
@@ -678,12 +753,12 @@
   return {
     BASE_CHARACTER, SET_BONUS_CUMULATIVE, SLOT_CAPACITY, SLOT_ORDER, SLOT_LABELS,
     STAT_GROUPS, ALL_STATS,
-    POINTS_PER_LEVEL, POINT_STATS, STAT_POINT_COSTS,
+    POINTS_PER_LEVEL, POINT_STATS, STAT_POINT_COSTS, SCROLL_VALUE, SCROLLED_STATS,
     hashSeed, makeRng, indexData, loadData,
     rollItem, checkRequirements,
     createLoadout, equip, unequip, equippedEntries, slotFree,
     createDistribution, pointsAvailable, pointsSpent, costToBuy, costOfNextPoint,
-    spendPoints, refundPoints,
+    spendPoints, refundPoints, setPoints, maxAffordable, scrollBonus,
     setEffectValue, addExoticEffect, removeExoticEffect, effectiveEffects, rerollEntry,
     activeSets, computeStats, filterItems, describeEffect,
     exportLoadout, importLoadout,
