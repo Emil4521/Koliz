@@ -199,6 +199,87 @@ function firstArray(obj, noms) {
   return null;
 }
 
+/**
+ * Cherche, dans un document, les champs dont la valeur vaut l'un des
+ * identifiants fournis. Sert à découvrir COMMENT un sort référence sa classe
+ * quand le nom du champ n'est pas celui qu'on croyait.
+ */
+function champsPortant(doc, valeurs) {
+  const trouves = [];
+  for (const [cle, valeur] of Object.entries(doc)) {
+    if (typeof valeur === "number" && valeurs.has(valeur)) trouves.push(`${cle}=${valeur}`);
+    else if (Array.isArray(valeur) && valeur.some((v) => typeof v === "number" && valeurs.has(v))) {
+      trouves.push(`${cle}=[…${valeur.filter((v) => valeurs.has(v)).join(",")}…]`);
+    }
+  }
+  return trouves;
+}
+
+/**
+ * Récupère les sorts d'une classe, sans présumer du schéma.
+ *
+ * Trois pistes, dans l'ordre : la liste d'identifiants portée par la classe
+ * elle-même, puis les filtres candidats sur /spells, et enfin — si rien ne
+ * marche — un échantillon non filtré dont on analyse les champs pour révéler
+ * la liaison réelle. Le premier run avait échoué faute de cette dernière
+ * étape : « aucun sort renvoyé » sans dire pourquoi.
+ */
+async function sortsDeLaClasse(classe, opts, reporter, diagnostic) {
+  // Piste 1 — la classe porte-t-elle la liste de ses sorts ?
+  const liste = firstArray(classe.raw, ["breedSpellsId", "spells", "spellIds", "spellsId"]);
+  if (liste) {
+    reporter.debug(`${classe.nom} : liste de sorts via « ${liste.nom} » (${liste.valeur.length})`);
+    const ids = liste.valeur.map((v) => (v && typeof v === "object" ? v.id : v)).filter(Number.isFinite);
+    if (ids.length) {
+      const query = {};
+      ids.forEach((id, i) => { query[`id[$in][${i}]`] = String(id); });
+      const rows = await fetchCollection("spells", query, opts, reporter, true);
+      if (rows.length) {
+        reporter.info(`  ${classe.nom} : ${rows.length} sorts via « ${liste.nom} »`);
+        return rows;
+      }
+    }
+  }
+
+  // Piste 2 — filtres candidats sur /spells.
+  for (const champ of ["breedId", "breed", "classId", "characterClassId", "typeId"]) {
+    const rows = await fetchCollection("spells", { [champ]: String(classe.id) }, opts, reporter, true);
+    if (rows.length) {
+      reporter.info(`  ${classe.nom} : ${rows.length} sorts via le filtre « ${champ} »`);
+      return rows;
+    }
+  }
+
+  // Piste 3 — échantillon non filtré, pour découvrir la liaison réelle.
+  if (!diagnostic.fait) {
+    diagnostic.fait = true;
+    // Une seule page suffit pour inspecter le schéma : inutile de rapatrier
+    // plusieurs milliers de sorts pour lire des noms de champs.
+    const params = new URLSearchParams({ lang: opts.lang, $limit: "5", $skip: "0" });
+    const page = await getJson(`${API}/spells?${params}`, opts, reporter);
+    const echantillon = Array.isArray(page) ? page : page.data || [];
+    const total = Array.isArray(page) ? echantillon.length : (page.total ?? echantillon.length);
+    reporter.warn(
+      `aucun filtre ne relie un sort à sa classe. ${total} sorts existent pourtant sur /spells.`
+    );
+    if (echantillon.length) {
+      const sort = echantillon[0];
+      reporter.info("");
+      reporter.info("Champs d'un sort — pour trouver comment il référence sa classe :");
+      reporter.info(`  ${Object.keys(sort).join(", ")}`);
+      const pistes = champsPortant(sort, diagnostic.idsClasses);
+      reporter.info(pistes.length
+        ? `  Champs portant un identifiant de classe connu : ${pistes.join("  ")}`
+        : "  Aucun champ ne porte d'identifiant de classe connu.");
+      reporter.info(`  ${JSON.stringify(sort).slice(0, 600)}`);
+      reporter.info("");
+      reporter.info("Champs d'une classe — au cas où elle porterait la liste de ses sorts :");
+      reporter.info(`  ${Object.keys(classe.raw).join(", ")}`);
+    }
+  }
+  return [];
+}
+
 /* ==========================================================================
    Transformation
    ========================================================================== */
@@ -339,7 +420,7 @@ async function main() {
   const voulues = [];
   for (const breed of breeds) {
     const nom = pickText(breed.shortName || breed.name, opts.lang);
-    if (opts.classes.includes(normalize(nom))) voulues.push({ id: breed.id, nom });
+    if (opts.classes.includes(normalize(nom))) voulues.push({ id: breed.id, nom, raw: breed });
   }
   if (!voulues.length) {
     const dispo = breeds.map((b) => pickText(b.shortName || b.name, opts.lang)).filter(Boolean);
@@ -355,12 +436,11 @@ async function main() {
   const spells = [];
   let schemaExpose = false;
 
+  const diagnostic = { fait: false, idsClasses: new Set(breeds.map((b) => b.id)) };
+
   for (const classe of voulues) {
-    const rawSpells = await fetchCollection("spells", { breedId: String(classe.id) }, opts, reporter, true);
-    if (!rawSpells.length) {
-      reporter.warn(`aucun sort renvoyé pour ${classe.nom} (#${classe.id}) avec le filtre breedId`);
-      continue;
-    }
+    const rawSpells = await sortsDeLaClasse(classe, opts, reporter, diagnostic);
+    if (!rawSpells.length) continue;
 
     for (const raw of rawSpells) {
       // Les paliers sont tantôt peuplés, tantôt réduits à des identifiants.
@@ -391,10 +471,14 @@ async function main() {
         levels: paliers,
       });
     }
-    reporter.info(`  ${classe.nom} : ${rawSpells.length} sorts récupérés`);
   }
 
-  if (!spells.length) throw new Error("aucun sort exploitable — le schéma de l'API a-t-il changé ?");
+  if (!spells.length) {
+    throw new Error(
+      "aucun sort exploitable. Le diagnostic ci-dessus liste les champs réellement "
+      + "renvoyés par /spells et /breeds : c'est là que se trouve la liaison classe → sorts."
+    );
+  }
 
   // 4. Écriture.
   const payload = {
@@ -465,5 +549,6 @@ if (require.main === module) {
 
 module.exports = {
   decodeZone, transformEffect, transformLevel, baseEffect,
+  firstArray, champsPortant,
   SPELL_EFFECT_KINDS, ZONE_SHAPES, ELEMENTS,
 };
