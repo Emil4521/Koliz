@@ -53,10 +53,12 @@ const MOCK = path.join(__dirname, "mock-api.js");
   const { transformSet } = require("../scripts/fetch_items.js");
   const opts = { lang: "fr" };
 
-  // Forme tableau : l'indice 0 correspond au palier « 2 pièces ».
+  // Forme tableau : l'entrée d'indice i vaut pour i + 1 pièces. Établi sur les
+  // données réelles — avec « indice + 2 », 519 panoplies sur 527 annonçaient un
+  // bonus pour plus de pièces qu'elles n'en comptent.
   const tableau = transformSet({
     id: 1, name: { fr: "P" }, items: [1, 2],
-    effects: [[{ effectId: 125, diceNum: 10, diceSide: 0 }], []],
+    effects: [[], [{ effectId: 125, diceNum: 10, diceSide: 0 }]],
   }, opts);
   assert.deepStrictEqual(tableau.bonuses, { 2: [{ effectId: 125, value: 10 }] }, "forme tableau");
 
@@ -70,7 +72,7 @@ const MOCK = path.join(__dirname, "mock-api.js");
   // Champ nommé autrement.
   const alt = transformSet({
     id: 3, name: { fr: "R" }, items: [5],
-    bonuses: [[{ effectId: 128, diceNum: 1, diceSide: 0 }]],
+    bonuses: [[], [{ effectId: 128, diceNum: 1, diceSide: 0 }]],
   }, opts);
   assert.deepStrictEqual(alt.bonuses, { 2: [{ effectId: 128, value: 1 }] }, "champ alternatif");
 
@@ -83,10 +85,20 @@ const MOCK = path.join(__dirname, "mock-api.js");
   const vide = transformSet({
     id: 5, name: { fr: "T" }, items: [6],
     effects: [],
-    possibleEffects: [[{ effectId: 125, diceNum: 20, diceSide: 0 }]],
+    possibleEffects: [[], [{ effectId: 125, diceNum: 20, diceSide: 0 }]],
   }, opts);
   assert.deepStrictEqual(vide.bonuses, { 2: [{ effectId: 125, value: 20 }] },
     "repli sur possibleEffects quand effects est vide");
+
+  // Invariant : le palier maximal ne dépasse jamais le nombre de pièces.
+  const grande = transformSet({
+    id: 6, name: { fr: "U" }, items: [1, 2, 3],
+    possibleEffects: [[], [{ effectId: 125, diceNum: 5, diceSide: 0 }],
+                      [{ effectId: 118, diceNum: 8, diceSide: 0 }]],
+  }, opts);
+  const paliers = Object.keys(grande.bonuses).map(Number);
+  assert.ok(Math.max(...paliers) <= grande.items.length,
+    "aucun bonus pour plus de pièces que la panoplie n'en compte");
 }
 
 /* --- Mentions descriptives ------------------------------------------------- */

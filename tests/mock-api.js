@@ -78,7 +78,10 @@ const SETS = [
   {
     id: 1, name: { fr: "Panoplie de test" },
     items: [1, 2, 3, 4, 5, 6],
+    // L'entrée d'indice i vaut pour i + 1 pièces : l'indice 0 (une pièce) est
+    // vide, comme dans les données réelles.
     effects: [
+      [],                                                                      // 1 pièce
       [{ effectId: 125, diceNum: 10, diceSide: 0, value: 0 }],                 // 2 pièces
       [{ effectId: 118, diceNum: 15, diceSide: 0, value: 0 }],                 // 3 pièces
       [{ effectId: 125, diceNum: 30, diceSide: 0 }, { effectId: 111, diceNum: 1, diceSide: 0 }], // 4

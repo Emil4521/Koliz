@@ -523,8 +523,15 @@ function transformSet(raw, opts) {
   for (const source of candidats) {
     if (!source) continue;
     const entries = Array.isArray(source)
-      // Tableau : l'indice 0 correspond au palier « 2 pièces ».
-      ? source.map((list, index) => [index + 2, list])
+      // Tableau : l'entrée d'indice i vaut pour i + 1 pièces équipées. L'indice
+      // 0 (une seule pièce) est donc vide, sauf sur les panoplies d'apparat qui
+      // y logent un titre ou une émote.
+      //
+      // Ce décalage a été établi sur les données réelles : avec « indice + 2 »,
+      // 519 panoplies sur 527 annonçaient un palier supérieur d'une unité à
+      // leur nombre de pièces — un bonus « 9 pièces » sur une panoplie qui n'en
+      // compte que 8, ce qui est impossible.
+      ? source.map((list, index) => [index + 1, list])
       // Objet : la clé EST le nombre de pièces.
       : Object.entries(source).map(([pieces, list]) => [Number(pieces), list]);
 
@@ -668,6 +675,39 @@ async function main() {
   const rawSets = await fetchCollection("item-sets", {}, opts, reporter);
   const sets = rawSets.map((s) => transformSet(s, opts)).filter((s) => Object.keys(s.bonuses).length);
 
+  // Les mentions descriptives n'ont pas plus leur place dans un bonus de
+  // panoplie que sur une fiche d'objet : les panoplies d'apparat y logent des
+  // titres et des émotes.
+  let mentionsSets = 0;
+  for (const set of sets) {
+    for (const [pieces, liste] of Object.entries(set.bonuses)) {
+      const filtre = liste.filter((b) => {
+        const def = effectMap[b.effectId];
+        if (def && isMetadataLabel(def.label)) { mentionsSets++; return false; }
+        return true;
+      });
+      if (filtre.length) set.bonuses[pieces] = filtre;
+      else delete set.bonuses[pieces];
+    }
+  }
+
+  // Invariant : une panoplie ne peut pas accorder de bonus pour plus de pièces
+  // qu'elle n'en compte. Un décalage d'indice dans le schéma de l'API se
+  // traduirait exactement par cette anomalie — c'est ainsi qu'elle a été
+  // détectée la première fois.
+  const incoherentes = sets.filter((set) => {
+    const paliers = Object.keys(set.bonuses).map(Number);
+    return paliers.length && set.items.length && Math.max(...paliers) > set.items.length;
+  });
+  if (incoherentes.length) {
+    reporter.warn(
+      `${incoherentes.length} panoplie(s) accordent un bonus pour plus de pièces qu'elles n'en `
+      + `comptent (ex. « ${incoherentes[0].name} » : ${incoherentes[0].items.length} pièces, `
+      + `palier ${Math.max(...Object.keys(incoherentes[0].bonuses).map(Number))}). `
+      + "Le mappage indice → nombre de pièces est probablement décalé."
+    );
+  }
+
   // Auto-diagnostic : des panoplies récupérées mais aucun bonus lisible signale
   // un schéma différent de celui attendu. Plutôt que de rendre zéro panoplie en
   // silence, on expose la forme reçue — le prochain run suffit alors à corriger
@@ -727,7 +767,7 @@ async function main() {
   }
   reporter.info(`Confiance des effets : ${byConfidence.verifie} vérifiés, ${byConfidence.probable} probables, ${byConfidence.incertain} incertains`);
   reporter.info(`Effets sans statistique agrégée : ${unmappedStat} (affichés dans la fiche, non cumulés)`);
-  reporter.info(`Mentions descriptives écartées des objets : ${mentionsEcartees}`);
+  reporter.info(`Mentions descriptives écartées : ${mentionsEcartees} sur les objets, ${mentionsSets} sur les panoplies`);
 
   if (unclassified.length) {
     reporter.info("");
