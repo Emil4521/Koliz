@@ -2165,7 +2165,7 @@
     "template": "#1{{~1~2 à }}#2 Dommage{{~ps}}{{~zs}} Poussée",
     "characteristic": 84,
     "operator": null,
-    "statKey": null,
+    "statKey": "domPoussee",
     "confidence": "probable"
   },
   "415": {
@@ -2174,7 +2174,7 @@
     "template": "-#1{{~1~2 à -}}#2 Dommage{{~ps}}{{~zs}} Poussée",
     "characteristic": 84,
     "operator": null,
-    "statKey": null,
+    "statKey": "domPoussee",
     "confidence": "probable"
   },
   "416": {
@@ -2183,7 +2183,7 @@
     "template": "#1{{~1~2 à }}#2 Résistance{{~ps}}{{~zs}} Poussée",
     "characteristic": 85,
     "operator": null,
-    "statKey": null,
+    "statKey": "resPoussee",
     "confidence": "probable"
   },
   "417": {
@@ -2192,7 +2192,7 @@
     "template": "-#1{{~1~2 à -}}#2 Résistance{{~ps}}{{~zs}} Poussée",
     "characteristic": 85,
     "operator": null,
-    "statKey": null,
+    "statKey": "resPoussee",
     "confidence": "probable"
   },
   "418": {
@@ -2219,7 +2219,7 @@
     "template": "#1{{~1~2 à }}#2 Résistance{{~ps}}{{~zs}} Critiques",
     "characteristic": 87,
     "operator": null,
-    "statKey": null,
+    "statKey": "resCrit",
     "confidence": "probable"
   },
   "421": {
@@ -2228,7 +2228,7 @@
     "template": "-#1{{~1~2 à -}}#2 Résistance{{~ps}}{{~zs}} Critiques",
     "characteristic": 87,
     "operator": null,
-    "statKey": null,
+    "statKey": "resCrit",
     "confidence": "probable"
   },
   "422": {
@@ -3074,7 +3074,7 @@
     "template": "#1{{~1~2 à }}#2% Érosion",
     "characteristic": 75,
     "operator": null,
-    "statKey": null,
+    "statKey": "erosion",
     "confidence": "probable"
   },
   "777": {
@@ -5000,7 +5000,7 @@
     "template": "#1% Dommages finaux",
     "characteristic": 107,
     "operator": null,
-    "statKey": null,
+    "statKey": "domPctFinaux",
     "confidence": "probable"
   },
   "1172": {
@@ -5009,7 +5009,7 @@
     "template": "-#1% Dommages finaux",
     "characteristic": 107,
     "operator": null,
-    "statKey": null,
+    "statKey": "domPctFinaux",
     "confidence": "probable"
   },
   "1173": {
@@ -5513,7 +5513,7 @@
     "template": "#1{{~1~2 à }}#2% Dommage{{~ps}}{{~zs}} Poussée",
     "characteristic": 158,
     "operator": null,
-    "statKey": null,
+    "statKey": "domPctPoussee",
     "confidence": "probable"
   },
   "2415": {
@@ -5522,7 +5522,7 @@
     "template": "-#1{{~1~2 à -}}#2% Dommage{{~ps}}{{~zs}} Poussée",
     "characteristic": 158,
     "operator": null,
-    "statKey": null,
+    "statKey": "domPctPoussee",
     "confidence": "probable"
   },
   "2792": {
@@ -5585,7 +5585,7 @@
     "template": "#1{{~1~2 à }}#2% Dommages mêlée",
     "characteristic": 125,
     "operator": null,
-    "statKey": null,
+    "statKey": "domPctMelee",
     "confidence": "probable"
   },
   "2801": {
@@ -5594,7 +5594,7 @@
     "template": "-#1{{~1~2 à -}}#2% Dommages mêlée",
     "characteristic": 125,
     "operator": null,
-    "statKey": null,
+    "statKey": "domPctMelee",
     "confidence": "probable"
   },
   "2802": {
@@ -5603,7 +5603,7 @@
     "template": "-#1{{~1~2 à -}}#2% Résistance mêlée",
     "characteristic": 124,
     "operator": null,
-    "statKey": null,
+    "statKey": "resPctMelee",
     "confidence": "probable"
   },
   "2803": {
@@ -5612,7 +5612,7 @@
     "template": "#1{{~1~2 à }}#2% Résistance mêlée",
     "characteristic": 124,
     "operator": null,
-    "statKey": null,
+    "statKey": "resPctMelee",
     "confidence": "probable"
   },
   "2804": {
@@ -5621,7 +5621,7 @@
     "template": "#1{{~1~2 à }}#2% Dommages distance",
     "characteristic": 120,
     "operator": null,
-    "statKey": null,
+    "statKey": "domPctDistance",
     "confidence": "probable"
   },
   "2805": {
@@ -5630,7 +5630,7 @@
     "template": "-#1{{~1~2 à -}}#2% Dommages distance",
     "characteristic": 120,
     "operator": null,
-    "statKey": null,
+    "statKey": "domPctDistance",
     "confidence": "probable"
   },
   "2806": {
@@ -5639,7 +5639,7 @@
     "template": "-#1{{~1~2 à -}}#2% Résistance distance",
     "characteristic": 121,
     "operator": null,
-    "statKey": null,
+    "statKey": "resPctDistance",
     "confidence": "probable"
   },
   "2807": {
@@ -5648,7 +5648,7 @@
     "template": "#1{{~1~2 à }}#2% Résistance distance",
     "characteristic": 121,
     "operator": null,
-    "statKey": null,
+    "statKey": "resPctDistance",
     "confidence": "probable"
   },
   "2808": {
@@ -5657,7 +5657,7 @@
     "template": "#1{{~1~2 à }}#2% Dommages d'armes",
     "characteristic": 122,
     "operator": null,
-    "statKey": null,
+    "statKey": "domPctArmes",
     "confidence": "probable"
   },
   "2809": {
@@ -5666,7 +5666,7 @@
     "template": "-#1{{~1~2 à -}}#2% Dommages d'armes",
     "characteristic": 122,
     "operator": null,
-    "statKey": null,
+    "statKey": "domPctArmes",
     "confidence": "probable"
   },
   "2810": {
@@ -5675,7 +5675,7 @@
     "template": "-#1{{~1~2 à -}}#2% Résistance aux armes",
     "characteristic": 142,
     "operator": null,
-    "statKey": null,
+    "statKey": "resPctArmes",
     "confidence": "probable"
   },
   "2811": {
@@ -5684,7 +5684,7 @@
     "template": "#1{{~1~2 à }}#2% Résistance aux armes",
     "characteristic": 142,
     "operator": null,
-    "statKey": null,
+    "statKey": "resPctArmes",
     "confidence": "probable"
   },
   "2812": {
@@ -5693,7 +5693,7 @@
     "template": "#1{{~1~2 à }}#2% Dommages aux sorts",
     "characteristic": 123,
     "operator": null,
-    "statKey": null,
+    "statKey": "domPctSorts",
     "confidence": "probable"
   },
   "2813": {
@@ -5702,7 +5702,7 @@
     "template": "-#1{{~1~2 à -}}#2% Dommages aux sorts",
     "characteristic": 123,
     "operator": null,
-    "statKey": null,
+    "statKey": "domPctSorts",
     "confidence": "probable"
   },
   "2814": {
@@ -5711,7 +5711,7 @@
     "template": "-#1{{~1~2 à -}}#2% Résistance aux sorts",
     "characteristic": 141,
     "operator": null,
-    "statKey": null,
+    "statKey": "resPctSorts",
     "confidence": "probable"
   },
   "2815": {
@@ -5720,7 +5720,7 @@
     "template": "#1{{~1~2 à }}#2% Résistance aux sorts",
     "characteristic": 141,
     "operator": null,
-    "statKey": null,
+    "statKey": "resPctSorts",
     "confidence": "probable"
   },
   "2817": {
@@ -7043,7 +7043,7 @@
     "template": "-#1{{~1~2 à }}#2% Érosion",
     "characteristic": 75,
     "operator": null,
-    "statKey": null,
+    "statKey": "erosion",
     "confidence": "probable"
   },
   "3805": {
