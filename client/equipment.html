@@ -164,6 +164,7 @@
 
 <header>
   <h1>Kolizéum <span>— v0.2 · équipement</span></h1>
+  <span id="provenance" class="muted" title="Jeu de données actuellement chargé"></span>
   <div class="field">
     <label for="level">Niveau</label>
     <input type="number" id="level" min="1" max="200" value="200">
@@ -669,8 +670,48 @@ function showBanner(data) {
   }
 }
 
-function boot() {
-  if (!window.KOLIZEUM_ITEMS) {
+/**
+ * Récupère le jeu de données le plus frais disponible.
+ *
+ * Sur http(s) — GitHub Pages par exemple — on relit `data/items.json` en
+ * contournant explicitement le cache. Le navigateur et le CDN servent
+ * volontiers une version périmée de `items.data.js`, sans que rien ne
+ * l'indique : on croit alors qu'une nouvelle extraction n'a pas été prise en
+ * compte, alors que les données sont bien à jour côté dépôt.
+ *
+ * En file://, fetch() est interdit par la politique d'origine : on retombe sur
+ * le global posé par la balise <script>, qui n'a pas ce problème puisque le
+ * fichier est lu directement sur le disque.
+ */
+async function loadPayload() {
+  if (location.protocol !== "file:") {
+    try {
+      const res = await fetch("data/items.json", { cache: "no-store" });
+      if (res.ok) return await res.json();
+    } catch (err) {
+      // Repli silencieux : l'absence du fichier est normale tant que
+      // l'extraction n'a pas tourné.
+    }
+  }
+  return window.KOLIZEUM_ITEMS || null;
+}
+
+/** Affiche en clair le jeu de données chargé, pour lever tout doute. */
+function showProvenance(data) {
+  const meta = data.meta || {};
+  const bits = [meta.source === "sample" ? "exemple" : (meta.source || "source inconnue")];
+  bits.push(`${data.items.length} objets`);
+  bits.push(`${data.sets.length} panoplie${data.sets.length > 1 ? "s" : ""}`);
+  if (meta.generatedAt) {
+    const d = new Date(meta.generatedAt);
+    if (!Number.isNaN(d.getTime())) bits.push(`extrait le ${d.toLocaleString("fr-FR")}`);
+  }
+  $("provenance").textContent = bits.join(" · ");
+}
+
+async function boot() {
+  const payload = await loadPayload();
+  if (!payload) {
     document.body.innerHTML =
       '<div style="padding:40px; font: 14px/1.6 system-ui; color:#dfe4ec">'
       + "<h2>Aucune donnée chargée</h2>"
@@ -681,8 +722,9 @@ function boot() {
     return;
   }
 
-  state.data = Items.indexData(window.KOLIZEUM_ITEMS);
+  state.data = Items.indexData(payload);
   showBanner(state.data);
+  showProvenance(state.data);
   fillSlotFilter();
   state.rng = Items.makeRng($("seed").value);
   setLevel(200);

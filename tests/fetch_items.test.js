@@ -76,6 +76,35 @@ const MOCK = path.join(__dirname, "mock-api.js");
 
   // Absence totale de paliers : ni exception, ni bonus inventé.
   assert.deepStrictEqual(transformSet({ id: 4, name: { fr: "S" } }, opts).bonuses, {}, "aucun palier");
+
+  // Cas relevé en production : `effects` existe mais VIDE, les bonus étant
+  // portés par `possibleEffects`. Un `a || b` retiendrait le tableau vide,
+  // qui est truthy, et rendrait zéro panoplie — ce qui est arrivé.
+  const vide = transformSet({
+    id: 5, name: { fr: "T" }, items: [6],
+    effects: [],
+    possibleEffects: [[{ effectId: 125, diceNum: 20, diceSide: 0 }]],
+  }, opts);
+  assert.deepStrictEqual(vide.bonuses, { 2: [{ effectId: 125, value: 20 }] },
+    "repli sur possibleEffects quand effects est vide");
+}
+
+/* --- Mentions descriptives ------------------------------------------------- */
+{
+  const { isMetadataLabel, statKeyForLabel } = require("../scripts/fetch_items.js");
+
+  // Relevées sur 220 objets réels : ce ne sont pas des caractéristiques.
+  for (const l of ["Compatible avec :", "Échangeable :", "Titre :", "/", ""]) {
+    assert.ok(isMetadataLabel(l), `« ${l} » doit être écartée`);
+  }
+  for (const l of ["Vitalité", "Force", "vol Eau", "Attitude"]) {
+    assert.ok(!isMetadataLabel(l), `« ${l} » doit être conservée`);
+  }
+
+  // Caractéristiques que l'API écrit sans « % » ni « de ».
+  assert.strictEqual(statKeyForLabel("Résistance Critiques"), "resCrit", "résistance aux critiques");
+  assert.strictEqual(statKeyForLabel("Résistance Poussée"), "resPoussee", "résistance à la poussée");
+  assert.strictEqual(statKeyForLabel("Dommage Poussée"), "domPoussee", "dommages de poussée");
 }
 
 const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "kolizeum-fetch-"));

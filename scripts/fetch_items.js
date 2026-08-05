@@ -108,6 +108,12 @@ const STAT_BY_LABEL = {
   // Critiques
   "% critique": "critPct", "critique": "critPct", "coups critiques": "critPct",
   "% resistance critiques": "resCrit",
+  // L'API écrit ces trois-là sans le « % » ni le « de » attendus. Relevés sur
+  // une extraction réelle : sans ces clés, la résistance aux critiques et les
+  // dommages/résistances de poussée n'entraient dans aucun total.
+  "resistance critiques": "resCrit",
+  "resistance poussee": "resPoussee",
+  "dommages poussee": "domPoussee",
 
   // Résistances en pourcentage
   "% resistance terre": "resPctTerre", "% resistance feu": "resPctFeu",
@@ -265,6 +271,19 @@ function statKeyForLabel(label) {
 function labelsMatch(a, b) {
   const na = normalize(a), nb = normalize(b);
   return na === nb || singularize(na) === singularize(nb);
+}
+
+/**
+ * Certaines entrées de la liste d'effets d'un objet ne sont pas des
+ * caractéristiques mais des mentions descriptives : « Compatible avec : »,
+ * « Échangeable : », « Titre : ». Elles encombrent les fiches sans rien
+ * apporter. On ne les écarte que sur un critère syntaxique — un libellé qui
+ * s'achève par deux points, ou dépourvu de toute lettre — plutôt que sur une
+ * liste noire d'identifiants, qui vieillirait mal.
+ */
+function isMetadataLabel(label) {
+  const l = String(label || "").trim();
+  return l.endsWith(":") || !/[\p{L}\p{N}]/u.test(l);
 }
 
 class Reporter {
@@ -481,24 +500,33 @@ function transformItem(raw, typeById, opts) {
  * plutôt que de rendre zéro panoplie en silence.
  */
 function transformSet(raw, opts) {
-  const bonuses = {};
+  // Une extraction réelle a montré que `effects` existe mais reste vide, les
+  // bonus se trouvant dans `possibleEffects`. Un simple `a || b` choisirait le
+  // tableau vide, qui est truthy : on essaie donc chaque champ candidat et on
+  // retient le PREMIER qui produit réellement des bonus.
+  const candidats = [raw.effects, raw.possibleEffects, raw.bonuses, raw.itemSetBonus];
 
-  const source = raw.effects || raw.bonuses || raw.itemSetBonus || null;
-  const entries = Array.isArray(source)
-    // Tableau : l'indice 0 correspond au palier « 2 pièces ».
-    ? source.map((list, index) => [index + 2, list])
-    // Objet : la clé EST le nombre de pièces.
-    : Object.entries(source || {}).map(([pieces, list]) => [Number(pieces), list]);
+  let bonuses = {};
+  for (const source of candidats) {
+    if (!source) continue;
+    const entries = Array.isArray(source)
+      // Tableau : l'indice 0 correspond au palier « 2 pièces ».
+      ? source.map((list, index) => [index + 2, list])
+      // Objet : la clé EST le nombre de pièces.
+      : Object.entries(source).map(([pieces, list]) => [Number(pieces), list]);
 
-  for (const [pieces, list] of entries) {
-    if (!Number.isFinite(pieces) || !Array.isArray(list)) continue;
-    const parsed = [];
-    for (const rawEffect of list) {
-      const e = normalizeEffect(rawEffect);
-      // Un bonus de panoplie est une valeur fixe, jamais un jet.
-      if (e) parsed.push({ effectId: e.effectId, value: e.max });
+    const trouves = {};
+    for (const [pieces, list] of entries) {
+      if (!Number.isFinite(pieces) || !Array.isArray(list)) continue;
+      const parsed = [];
+      for (const rawEffect of list) {
+        const e = normalizeEffect(rawEffect);
+        // Un bonus de panoplie est une valeur fixe, jamais un jet.
+        if (e) parsed.push({ effectId: e.effectId, value: e.max });
+      }
+      if (parsed.length) trouves[pieces] = parsed;
     }
-    if (parsed.length) bonuses[pieces] = parsed;
+    if (Object.keys(trouves).length) { bonuses = trouves; break; }
   }
 
   return {
@@ -602,9 +630,16 @@ async function main() {
   const items = [];
   const slotCounts = {};
   const unknownEffectIds = new Set();
+  let mentionsEcartees = 0;
   for (const raw of rawItems) {
     const item = transformItem(raw, typeById, opts);
     if (item.slot === "autre") continue;              // filtré : hors équipement
+
+    item.effects = item.effects.filter((e) => {
+      const def = effectMap[e.effectId];
+      if (def && isMetadataLabel(def.label)) { mentionsEcartees++; return false; }
+      return true;
+    });
     if (!item.effects.length && item.slot !== "arme") continue;   // objet sans stat
     for (const e of item.effects) if (!effectMap[e.effectId]) unknownEffectIds.add(e.effectId);
     slotCounts[item.slot] = (slotCounts[item.slot] || 0) + 1;
@@ -674,6 +709,7 @@ async function main() {
   }
   reporter.info(`Confiance des effets : ${byConfidence.verifie} vérifiés, ${byConfidence.probable} probables, ${byConfidence.incertain} incertains`);
   reporter.info(`Effets sans statistique agrégée : ${unmappedStat} (affichés dans la fiche, non cumulés)`);
+  reporter.info(`Mentions descriptives écartées des objets : ${mentionsEcartees}`);
 
   if (unclassified.length) {
     reporter.info("");
@@ -708,7 +744,7 @@ if (require.main === module) {
 
 module.exports = {
   normalize, pickText, labelFromTemplate, normalizeEffect,
-  statKeyForLabel, labelsMatch,
+  statKeyForLabel, labelsMatch, isMetadataLabel,
   slotForType, transformItem, transformSet, buildEffectMap,
   SLOT_CAPACITY, SLOT_BY_TYPE, STAT_BY_LABEL, EFFECT_CROSSCHECK,
 };
