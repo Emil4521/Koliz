@@ -538,6 +538,9 @@ function transformSet(raw, opts) {
     const trouves = {};
     for (const [pieces, list] of entries) {
       if (!Number.isFinite(pieces) || !Array.isArray(list)) continue;
+      // Un « bonus de panoplie » à moins de deux pièces n'a pas de sens : les
+      // seules entrées qu'on y trouve sont des émotes de panoplies d'apparat.
+      if (pieces < 2) continue;
       const parsed = [];
       for (const rawEffect of list) {
         const e = normalizeEffect(rawEffect);
@@ -549,10 +552,18 @@ function transformSet(raw, opts) {
     if (Object.keys(trouves).length) { bonuses = trouves; break; }
   }
 
+  // L'API peuple `items` avec les objets COMPLETS, tous champs bruts compris.
+  // Les recopier tels quels pesait 17,6 Mo sur les 19,2 du jeu de données, soit
+  // 92 % du fichier — et rendait la liste inutilisable, puisqu'on y cherche des
+  // identifiants. On ne garde donc que ceux-ci.
+  const items = (raw.items || raw.itemIds || [])
+    .map((entry) => (entry && typeof entry === "object" ? entry.id : entry))
+    .filter((id) => Number.isFinite(id));
+
   return {
     id: raw.id,
     name: pickText(raw.name, opts.lang),
-    items: raw.items || raw.itemIds || [],
+    items,
     bonuses,
   };
 }
@@ -689,6 +700,14 @@ async function main() {
       if (filtre.length) set.bonuses[pieces] = filtre;
       else delete set.bonuses[pieces];
     }
+  }
+
+  // Le filtrage des mentions peut vider entièrement une panoplie d'apparat dont
+  // tous les « bonus » étaient des titres : elle n'a alors plus rien à apporter.
+  const setsVides = sets.filter((set) => !Object.keys(set.bonuses).length);
+  if (setsVides.length) {
+    for (const vide of setsVides) sets.splice(sets.indexOf(vide), 1);
+    reporter.info(`  ${setsVides.length} panoplie(s) écartée(s), sans aucun bonus exploitable`);
   }
 
   // Invariant : une panoplie ne peut pas accorder de bonus pour plus de pièces

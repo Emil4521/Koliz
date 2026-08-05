@@ -423,7 +423,7 @@ function renderPoints() {
   });
   ligneParch.appendChild(caseParch);
   const texteParch = el("span", "muted",
-    `Parchemins : +${Items.SCROLL_VALUE} dans les 4 éléments`);
+    `Parchemins : +${Items.SCROLL_VALUE} dans les ${Items.SCROLLED_STATS.length} caractéristiques`);
   texteParch.title = "Ces points ne coûtent rien et n'entrent pas dans le calcul des paliers.";
   ligneParch.appendChild(texteParch);
   body.appendChild(ligneParch);
@@ -437,13 +437,8 @@ function renderPoints() {
   box.appendChild(body);
 }
 
-/** Libellé d'affichage d'une statistique agrégée. */
-function statLabel(key) {
-  for (const groupe of Items.STAT_GROUPS) {
-    for (const [k, label] of groupe.stats) if (k === key) return label;
-  }
-  return key;
-}
+/** Libellé d'affichage d'une statistique agrégée (défini par le modèle). */
+const statLabel = Items.statLabel;
 
 function weaponLine(item) {
   const w = item.weapon;
@@ -761,19 +756,6 @@ $("btnImport").addEventListener("click", () => {
    Forgemagie
    ========================================================================== */
 
-/** Effets proposables en ligne exotique : ceux qui alimentent une statistique. */
-function forgeableEffects() {
-  const parLibelle = new Map();
-  for (const def of Object.values(state.data.effects)) {
-    if (!def.statKey || !def.label) continue;
-    // Plusieurs identifiants partagent le même libellé : on garde le plus petit,
-    // le choix étant sans conséquence puisque l'agrégation passe par statKey.
-    const existant = parLibelle.get(def.label);
-    if (!existant || def.id < existant.id) parLibelle.set(def.label, def);
-  }
-  return [...parLibelle.values()].sort((a, b) => a.label.localeCompare(b.label, "fr"));
-}
-
 /**
  * Éditeur de forgemagie d'un exemplaire équipé. Les valeurs ne sont pas
  * bornées : dépasser la fourchette officielle est signalé, jamais empêché.
@@ -825,9 +807,10 @@ function openForge(item, entry) {
     // --- Ajout d'une ligne exotique ---
     corps.appendChild(el("div", "fm-sep", "Ajouter une ligne exotique"));
 
-    const natifs = new Set((item.effects || []).map((e) => e.effectId));
-    const deja = new Set(entry.exotic || []);
-    const dispo = forgeableEffects().filter((d) => !natifs.has(d.id) && !deja.has(d.id));
+    // Une entrée par statistique, jamais par identifiant d'effet : plusieurs
+    // identifiants désignent la même chose (« Soin » et « Soins »), et les
+    // proposer séparément laisserait croire à deux caractéristiques distinctes.
+    const dispo = Items.forgeableStats(item, entry, state.data);
 
     if (!dispo.length) {
       corps.appendChild(el("div", "muted", "Aucune caractéristique supplémentaire disponible."));

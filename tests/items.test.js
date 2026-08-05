@@ -311,13 +311,18 @@ const LEVEL = { level: 200 };
   lo.scrolled = true;
 
   let s = I.computeStats(lo, data, LEVEL);
-  for (const stat of I.SCROLLED_STATS) {
+  // Les six caractéristiques sont parchotables, vitalité et sagesse comprises.
+  assert.deepStrictEqual([...I.SCROLLED_STATS].sort(), [...I.POINT_STATS].sort(),
+    "toutes les caractéristiques de points sont parchotables");
+  for (const stat of I.POINT_STATS) {
     assert.strictEqual(s.fromScrolls[stat], I.SCROLL_VALUE, `${stat} parchotée`);
     assert.strictEqual(s.total[stat], I.SCROLL_VALUE, `${stat} totale sans points`);
   }
-  assert.strictEqual(s.fromScrolls.vitalite, 0, "la vitalité n'est pas parchotée");
-  assert.strictEqual(s.fromScrolls.sagesse, 0, "la sagesse n'est pas parchotée");
   assert.strictEqual(s.points.spent, 0, "les parchemins ne coûtent aucun point");
+
+  // La vie suit la vitalité parchotée.
+  const vieBase = I.BASE_CHARACTER.vieBase + 199 * I.BASE_CHARACTER.viePerLevel;
+  assert.strictEqual(s.life.total, vieBase + I.SCROLL_VALUE, "la vitalité parchotée donne de la vie");
 
   // Le point crucial : les 101 des parchemins n'entrent PAS dans les paliers.
   I.setPoints(lo.distribution, "force", 100, 200);
@@ -331,6 +336,46 @@ const LEVEL = { level: 200 };
   lo.scrolled = false;
   s = I.computeStats(lo, data, LEVEL);
   assert.strictEqual(s.total.force, 100, "sans parchemins, seuls les points comptent");
+}
+
+/* --- Statistiques ajoutables en exotique ------------------------------------
+   Plusieurs identifiants d'effet désignent la même chose — « Soin », « Soins »,
+   « soins » — et les proposer séparément laisserait croire à autant de
+   caractéristiques distinctes, tout en permettant de les cumuler par erreur. */
+{
+  const payload = {
+    meta: {},
+    effects: {
+      81: { id: 81, label: "soins", statKey: "soins" },
+      143: { id: 143, label: "Soins", statKey: "soins" },
+      178: { id: 178, label: "Soin", statKey: "soins" },
+      118: { id: 118, label: "Force", statKey: "force" },
+      125: { id: 125, label: "Vitalité", statKey: "vitalite" },
+      400: { id: 400, label: "Non Échangeable", statKey: null },
+    },
+    sets: [],
+    items: [{ id: 1, name: "Test", slot: "coiffe", level: 1, setId: null,
+              effects: [{ effectId: 125, min: 1, max: 1 }] }],
+  };
+  const d = I.indexData(payload);
+  const it = d.itemById.get(1);
+  const entry = { itemId: 1, roll: { 125: 1 }, exotic: [] };
+
+  let dispo = I.forgeableStats(it, entry, d);
+  const cles = dispo.map((x) => x.statKey);
+  assert.strictEqual(new Set(cles).size, cles.length, "une seule entrée par statistique");
+  assert.strictEqual(cles.filter((k) => k === "soins").length, 1,
+    "les trois identifiants de soins donnent une seule entrée");
+  assert.ok(!cles.includes("vitalite"), "une statistique déjà native n'est pas proposée");
+  assert.ok(!dispo.some((x) => x.id === 400), "un effet sans statistique n'est pas proposable");
+
+  // Le libellé proposé est le libellé canonique, pas celui d'un effet au hasard.
+  assert.strictEqual(dispo.find((x) => x.statKey === "soins").label, I.statLabel("soins"));
+
+  // Une fois ajoutée, la statistique disparaît des propositions.
+  I.addExoticEffect(entry, it, dispo.find((x) => x.statKey === "soins").id, 10);
+  dispo = I.forgeableStats(it, entry, d);
+  assert.ok(!dispo.some((x) => x.statKey === "soins"), "statistique déjà forgée retirée de la liste");
 }
 
 /* --- Les points alimentent les statistiques -------------------------------- */

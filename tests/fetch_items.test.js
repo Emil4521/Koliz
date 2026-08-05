@@ -90,6 +90,28 @@ const MOCK = path.join(__dirname, "mock-api.js");
   assert.deepStrictEqual(vide.bonuses, { 2: [{ effectId: 125, value: 20 }] },
     "repli sur possibleEffects quand effects est vide");
 
+  // Un bonus à moins de deux pièces n'a pas de sens : seules les panoplies
+  // d'apparat en portent, sous forme d'émote ou de titre.
+  const cosmetique = transformSet({
+    id: 7, name: { fr: "V" }, items: [1, 2],
+    possibleEffects: [[{ effectId: 10, diceNum: 23, diceSide: 0 }],
+                      [{ effectId: 125, diceNum: 5, diceSide: 0 }]],
+  }, opts);
+  assert.ok(!("1" in cosmetique.bonuses), "aucun palier à une seule pièce");
+  assert.deepStrictEqual(cosmetique.bonuses, { 2: [{ effectId: 125, value: 5 }] },
+    "seul le palier à deux pièces subsiste");
+
+  // L'API peuple `items` avec les objets complets : on n'en garde que les
+  // identifiants. Les recopier pesait 92 % du jeu de données et rendait la
+  // liste inutilisable, puisqu'on y cherche des identifiants.
+  const peuple = transformSet({
+    id: 8, name: { fr: "W" },
+    items: [{ id: 42, name: { fr: "X" }, possibleEffects: [] },
+            { id: 43, name: { fr: "Y" }, possibleEffects: [] }],
+    possibleEffects: [[], [{ effectId: 125, diceNum: 5, diceSide: 0 }]],
+  }, opts);
+  assert.deepStrictEqual(peuple.items, [42, 43], "objets réduits à leurs identifiants");
+
   // Invariant : le palier maximal ne dépasse jamais le nombre de pièces.
   const grande = transformSet({
     id: 6, name: { fr: "U" }, items: [1, 2, 3],
@@ -191,6 +213,10 @@ const byId = new Map(payload.items.map((i) => [i.id, i]));
 
 /* --- Panoplies : bonus indexés par nombre de pièces ------------------------ */
 {
+  for (const set of payload.sets) {
+    assert.ok(set.items.every((id) => typeof id === "number"),
+      `la panoplie « ${set.name} » ne doit contenir que des identifiants`);
+  }
   const bonuses = payload.sets[0].bonuses;
   assert.deepStrictEqual(bonuses["2"], [{ effectId: 125, value: 10 }], "palier 2 pièces");
   assert.deepStrictEqual(bonuses["3"], [{ effectId: 118, value: 15 }], "palier 3 pièces");

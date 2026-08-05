@@ -120,6 +120,12 @@
 
   const ALL_STATS = STAT_GROUPS.flatMap((g) => g.stats.map(([key]) => key));
 
+  /** Libellé d'affichage canonique d'une statistique agrégée. */
+  const STAT_LABELS = new Map(STAT_GROUPS.flatMap((g) => g.stats));
+  function statLabel(key) {
+    return STAT_LABELS.get(key) || key;
+  }
+
   /* ========================================================================
      Points de caractéristiques
      ------------------------------------------------------------------------
@@ -166,7 +172,8 @@
    * 1 point par point, pour un total affiché de 201.
    */
   const SCROLL_VALUE = 101;
-  const SCROLLED_STATS = ["force", "intelligence", "chance", "agilite"];
+  // Les six caractéristiques sont parchotables, vitalité et sagesse comprises.
+  const SCROLLED_STATS = ["vitalite", "sagesse", "force", "intelligence", "chance", "agilite"];
   // Les quatre caractéristiques élémentaires partagent le même barème.
   STAT_POINT_COSTS.intelligence = STAT_POINT_COSTS.force;
   STAT_POINT_COSTS.chance = STAT_POINT_COSTS.force;
@@ -510,6 +517,42 @@
   }
 
   /**
+   * Statistiques ajoutables en ligne exotique sur un exemplaire.
+   *
+   * Une entrée par STATISTIQUE, non par identifiant d'effet : plusieurs
+   * identifiants désignent la même chose — « Soin » et « Soins » par exemple —
+   * et les proposer séparément laisserait croire à deux caractéristiques
+   * distinctes, tout en permettant de les cumuler par erreur sur un même objet.
+   *
+   * Les statistiques déjà portées, nativement ou par une ligne exotique, sont
+   * exclues : un objet ne porte jamais deux fois la même caractéristique.
+   */
+  function forgeableStats(item, entry, data) {
+    const deja = new Set();
+    for (const e of item.effects || []) {
+      const def = data.effects[e.effectId];
+      if (def && def.statKey) deja.add(def.statKey);
+    }
+    for (const id of (entry && entry.exotic) || []) {
+      const def = data.effects[id];
+      if (def && def.statKey) deja.add(def.statKey);
+    }
+
+    const parStat = new Map();
+    for (const def of Object.values(data.effects)) {
+      if (!def.statKey || deja.has(def.statKey)) continue;
+      // À signification égale, on retient le plus petit identifiant : le choix
+      // est sans conséquence puisque l'agrégation passe par statKey.
+      const existant = parStat.get(def.statKey);
+      if (!existant || def.id < existant.id) parStat.set(def.statKey, def);
+    }
+
+    return [...parStat.values()]
+      .map((def) => ({ id: def.id, statKey: def.statKey, label: statLabel(def.statKey) }))
+      .sort((a, b) => a.label.localeCompare(b.label, "fr"));
+  }
+
+  /**
    * Relance les jets des lignes NATIVES uniquement : une ligne exotique a été
    * ajoutée à la main, la relancer reviendrait à la supprimer sans le dire.
    */
@@ -752,7 +795,7 @@
 
   return {
     BASE_CHARACTER, SET_BONUS_CUMULATIVE, SLOT_CAPACITY, SLOT_ORDER, SLOT_LABELS,
-    STAT_GROUPS, ALL_STATS,
+    STAT_GROUPS, ALL_STATS, statLabel,
     POINTS_PER_LEVEL, POINT_STATS, STAT_POINT_COSTS, SCROLL_VALUE, SCROLLED_STATS,
     hashSeed, makeRng, indexData, loadData,
     rollItem, checkRequirements,
@@ -760,6 +803,7 @@
     createDistribution, pointsAvailable, pointsSpent, costToBuy, costOfNextPoint,
     spendPoints, refundPoints, setPoints, maxAffordable, scrollBonus,
     setEffectValue, addExoticEffect, removeExoticEffect, effectiveEffects, rerollEntry,
+    forgeableStats,
     activeSets, computeStats, filterItems, describeEffect,
     exportLoadout, importLoadout,
   };
