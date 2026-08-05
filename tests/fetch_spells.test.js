@@ -1,11 +1,14 @@
 /**
  * Tests de bout en bout de scripts/fetch_spells.js, contre deux fausses API.
  *
- * La première suppose que `/spells?breedId=N` fonctionne. La seconde reproduit
- * ce qui a été observé en production : ce filtre répond sans erreur mais sans
- * résultat, et c'est la CLASSE qui porte la liste de ses sorts. Le script doit
- * s'en sortir dans les deux cas — et, s'il n'y arrive pas, exposer les champs
- * reçus au lieu de se contenter d'un « aucun sort ».
+ * La première reproduit le schéma RÉEL de DofusDB, établi en interrogeant
+ * l'API à la main : la classe liste ses sorts dans `breedSpellsId`, le nom
+ * vient de `/spells/<id>` et les données de jeu de `/spell-levels?spellId=N`.
+ * Aucun filtre groupé n'est accepté.
+ *
+ * La seconde est dégradée — la classe ne porte aucune liste — pour vérifier
+ * que le script expose les champs reçus au lieu d'un « aucun sort » muet, ce
+ * qui avait coûté deux runs en production.
  */
 
 "use strict";
@@ -31,21 +34,27 @@ function extraire(mock, args) {
   return { run, payload, rapport: `${run.stdout}\n${run.stderr}`, outDir };
 }
 
-/* --- Schéma nominal : le filtre par classe fonctionne ---------------------- */
+/* --- Schéma réel ----------------------------------------------------------- */
 {
   const { run, payload, rapport, outDir } = extraire("mock-api.js");
   assert.strictEqual(run.status, 0, `le script doit réussir :\n${rapport}`);
 
   assert.strictEqual(payload.spells.length, 4, "sorts conservés");
+  assert.ok(/breedSpellsId/.test(rapport), "la liaison passe par breedSpellsId");
+  assert.ok(/sans palier/.test(rapport), "un sort sans palier est signalé, pas fatal");
   assert.ok(payload.spells.every((s) => ["iop", "cra"].includes(s.class)),
     "seules les classes demandées sont extraites");
   assert.ok(!payload.spells.some((s) => s.name === "Armure Féca"),
     "une classe non demandée n'est pas extraite");
 
-  // Les paliers sont convertis au format déclaratif du brief.
+  // Seul le palier MAXIMAL est conservé : garder les six paliers multiplierait
+  // le volume et la complexité sans rien apporter au 1v1 de haut niveau.
   const pression = payload.spells.find((s) => s.name === "Pression");
-  assert.strictEqual(pression.levels.length, 2, "deux paliers");
-  const dernier = pression.levels[1];
+  assert.strictEqual(pression.levels.length, 1, "un seul palier conservé");
+  const dernier = pression.levels[0];
+  assert.strictEqual(dernier.level, 6, "c'est bien le palier le plus haut");
+  assert.strictEqual(pression.description, "Frappe de près.",
+    "la description vient de /spells/<id>, l'autre requête");
   assert.strictEqual(dernier.apCost, 4, "coût en PA");
   assert.deepStrictEqual(dernier.ranges, [{ min: 1, max: 1 }], "portée");
   assert.strictEqual(dernier.lineOfSight, true, "ligne de vue requise");
@@ -78,28 +87,17 @@ function extraire(mock, args) {
   fs.rmSync(outDir, { recursive: true, force: true });
 }
 
-/* --- Schéma réel : le filtre par classe ne donne rien ----------------------
-   Le premier run en production a échoué exactement là, en disant « aucun sort
-   renvoyé » sans indiquer par quoi remplacer le filtre. Le script doit
-   désormais trouver la liaison tout seul. */
+/* --- Schéma dégradé : aucune liste de sorts sur la classe -------------------
+   Le script doit exposer les champs reçus et échouer proprement, jamais rendre
+   un « aucun sort » sans explication. */
 {
-  const { run, payload, rapport, outDir } = extraire("mock-api-spells-alt.js");
-  assert.strictEqual(run.status, 0, `le script doit réussir malgré le filtre inopérant :\n${rapport}`);
+  const { run, rapport, outDir } = extraire("mock-api-spells-alt.js");
+  assert.notStrictEqual(run.status, 0, "l'extraction doit échouer explicitement");
 
-  assert.strictEqual(payload.spells.length, 3, "sorts retrouvés via la liste de la classe");
-  assert.ok(/breedSpellsId/.test(rapport), "la piste retenue est annoncée");
-  // La fausse API renvoie HTTP 500 sur tout filtre groupé, comme la vraie : si
-  // le script en employait un, l'extraction échouerait au lieu d'aboutir.
-  assert.ok(!/\$in/.test(rapport), "aucun filtre groupé n'apparaît dans le rapport");
-
-  const parClasse = payload.spells.reduce((acc, s) => {
-    acc[s.class] = (acc[s.class] || 0) + 1;
-    return acc;
-  }, {});
-  assert.strictEqual(parClasse.iop, 2, "deux sorts de Iop");
-  assert.strictEqual(parClasse.cra, 1, "un sort de Crâ");
-  assert.ok(!payload.spells.some((s) => s.name === "Armure Féca"),
-    "la classe non demandée reste exclue même par cette piste");
+  assert.ok(/aucune liste de sorts/.test(rapport), "le manque est nommé");
+  assert.ok(/Champs d'une classe/.test(rapport), "les champs reçus sont exposés");
+  assert.ok(/someOtherField/.test(rapport), "le contenu réel du document est montré");
+  assert.ok(!/\$in/.test(rapport), "aucun filtre groupé n'est employé");
 
   fs.rmSync(outDir, { recursive: true, force: true });
 }

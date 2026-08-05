@@ -172,7 +172,9 @@ const byId = new Map(payload.items.map((i) => [i.id, i]));
   // 14 objets dans la fausse API, dont 1 hors type d'équipement (filtré côté
   // requête) et 1 sans effet utile (filtré à la transformation).
   assert.strictEqual(payload.items.length, 12, "objets conservés");
-  assert.strictEqual(payload.meta.counts.effects, 15, "effets récupérés");
+  // La fausse API est partagée avec les tests de sorts : sa table d'effets
+  // couvre les deux domaines.
+  assert.strictEqual(payload.meta.counts.effects, 20, "effets récupérés");
   assert.strictEqual(payload.sets.length, 1, "panoplies conservées");
 }
 

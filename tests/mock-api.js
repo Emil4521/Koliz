@@ -42,6 +42,13 @@ const EFFECTS = [
   { id: 158, description: { fr: "+#1{~1~2 à }#2 Pod" }, characteristic: 26, operator: "+" },
   // Effet sans statistique agrégée : affichable, non cumulé.
   { id: 400, description: { fr: "Rend l'objet Non Échangeable" }, characteristic: null, operator: null },
+
+  // Effets de SORT, pour que le recoupement des libellés soit exercé.
+  { id: 97, description: { fr: "#1{{~1~2 à }}#2 dommages Terre" } },
+  { id: 98, description: { fr: "#1{{~1~2 à }}#2 dommages Air" } },
+  { id: 81, description: { fr: "#1{{~1~2 à }}#2 soins" } },
+  { id: 1040, description: { fr: "#1{{~1~2 à }}#2 Bouclier" } },
+  { id: 412, description: { fr: "#1{{~1~2 à }}#2 Retrait PM" } },
 ];
 
 function mkItem(id, typeId, level, name, effects, extra = {}) {
@@ -92,18 +99,34 @@ const SETS = [
 
 
 /* ---------------------------------------------------------------------------
-   Sorts : classes, sorts et paliers, au schéma supposé de DofusDB.
+   Sorts — schéma réel de DofusDB, établi en interrogeant l'API à la main :
+
+     /breeds                       breedSpellsId : liste d'identifiants
+     /spells/<id>                  nom et description (objet, non paginé)
+     /spell-levels?spellId=<id>    coût, portée, zone, effets (paginé)
+
+   Les filtres groupés `$in` et les filtres par classe sur /spells sont
+   refusés, exactement comme en production.
    --------------------------------------------------------------------------- */
 
 const BREEDS = [
-  { id: 7, shortName: { fr: "Iop" }, name: { fr: "Iop" } },
-  { id: 9, shortName: { fr: "Crâ" }, name: { fr: "Crâ" } },
-  { id: 1, shortName: { fr: "Féca" }, name: { fr: "Féca" } },
+  { id: 8, shortName: { fr: "Iop" }, name: { fr: "Iop" }, breedSpellsId: [101, 102, 106] },
+  { id: 9, shortName: { fr: "Crâ" }, name: { fr: "Crâ" }, breedSpellsId: [103, 104] },
+  { id: 1, shortName: { fr: "Féca" }, name: { fr: "Féca" }, breedSpellsId: [105] },
 ];
 
-function mkLevel(grade, apCost, minRange, range, effects, extra = {}) {
+const SPELL_DOCS = {
+  101: { id: 101, name: { fr: "Pression" }, description: { fr: "Frappe de près." } },
+  102: { id: 102, name: { fr: "Puissance" }, description: { fr: "Renforce." } },
+  103: { id: 103, name: { fr: "Flèche Magique" }, description: { fr: "Tire de loin." } },
+  104: { id: 104, name: { fr: "Sort Exotique" }, description: { fr: "Effets variés." } },
+  105: { id: 105, name: { fr: "Armure Féca" }, description: { fr: "Protège." } },
+  106: { id: 106, name: { fr: "Sort Sans Palier" }, description: { fr: "Rien à extraire." } },
+};
+
+function mkLevel(spellId, grade, apCost, minRange, range, effects, extra = {}) {
   return {
-    grade, apCost, minRange, range,
+    spellId, grade, apCost, minRange, range,
     castTestLos: true, rangeCanBeBoosted: false,
     criticalHitProbability: 30, maxCastPerTurn: 2, minPlayerLevel: grade * 10,
     zoneDescr: { shape: 80, param1: 0, param2: 0 },   // 'P' : case unique
@@ -114,45 +137,23 @@ function mkLevel(grade, apCost, minRange, range, effects, extra = {}) {
   };
 }
 
-const SPELLS = [
-  {
-    id: 101, breedId: 7, name: { fr: "Pression" }, description: { fr: "Frappe de près." },
-    spellLevels: [
-      mkLevel(1, 4, 1, 1, [[97, 2, 15]]),
-      mkLevel(6, 4, 1, 1, [[97, 16, 20]]),
-    ],
-  },
-  {
-    id: 102, breedId: 7, name: { fr: "Puissance" }, description: { fr: "Renforce." },
-    spellLevels: [
-      // Boost : statistique + durée non nulle.
-      mkLevel(6, 2, 0, 0, [[118, 40, 40, 3]]),
-    ],
-  },
-  {
-    id: 103, breedId: 9, name: { fr: "Flèche Magique" }, description: { fr: "Tire de loin." },
-    spellLevels: [
-      mkLevel(6, 4, 1, 8, [[98, 21, 25]], {
-        rangeCanBeBoosted: true,
-        zoneDescr: { shape: 67, param1: 2, param2: 0 },   // 'C' : disque de 2
-      }),
-    ],
-  },
-  {
-    id: 104, breedId: 9, name: { fr: "Sort Exotique" }, description: { fr: "Effets variés." },
-    spellLevels: [
-      mkLevel(6, 3, 1, 4, [
-        [81, 10, 20],        // soins
-        [1040, 50, 50],      // bouclier
-        [412, 1, 2],         // retrait PM
-        [9999, 1, 1],        // effet inconnu : doit rester non classé
-      ], { zoneDescr: { shape: 90, param1: 1 } }),   // 'Z' : forme non décodée
-    ],
-  },
-  // Sort d'une classe non demandée : ne doit pas être extrait.
-  { id: 105, breedId: 1, name: { fr: "Armure Féca" }, spellLevels: [mkLevel(6, 3, 0, 0, [[1040, 100, 100]])] },
-  // Sort sans paliers exploitables : doit déclencher le diagnostic.
-  { id: 106, breedId: 7, name: { fr: "Sort Cassé" }, spellLevels: [] },
+// Plusieurs paliers par sort : seul le plus haut doit être retenu.
+const SPELL_LEVELS = [
+  mkLevel(101, 1, 3, 1, 1, [[97, 2, 15]]),
+  mkLevel(101, 6, 4, 1, 1, [[97, 16, 20]]),
+  mkLevel(102, 6, 2, 0, 0, [[118, 40, 40, 3]]),
+  mkLevel(103, 6, 4, 1, 8, [[98, 21, 25]], {
+    rangeCanBeBoosted: true,
+    zoneDescr: { shape: 67, param1: 2, param2: 0 },   // 'C' : disque de 2
+  }),
+  mkLevel(104, 6, 3, 1, 4, [
+    [81, 10, 20],     // soins
+    [1040, 50, 50],   // bouclier
+    [412, 1, 2],      // retrait PM
+    [9999, 1, 1],     // effet inconnu : doit rester non classé
+  ], { zoneDescr: { shape: 90, param1: 1 } }),        // 'Z' : forme non décodée
+  mkLevel(105, 6, 3, 0, 0, [[1040, 100, 100]]),
+  // Le sort 106 n'a aucun palier : il doit être signalé, pas planté.
 ];
 
 function paginate(rows, url) {
@@ -163,14 +164,29 @@ function paginate(rows, url) {
 
 globalThis.fetch = async (input) => {
   const url = new URL(String(input));
+  // Aucun filtre groupé n'est accepté, quelle que soit la collection : c'est
+  // ainsi que la vraie API se comporte, et deux extractions s'y sont cassé les
+  // dents avant qu'on en tire la leçon.
+  if ([...url.searchParams.keys()].some((k) => k.includes("[$in]"))) {
+    return { ok: false, status: 500, json: async () => ({ message: "filtre groupé refusé" }) };
+  }
   let rows;
   if (url.pathname === "/item-types") rows = TYPES;
   else if (url.pathname === "/effects") rows = EFFECTS;
   else if (url.pathname === "/item-sets") rows = SETS;
   else if (url.pathname === "/breeds") rows = BREEDS;
+  else if (url.pathname === "/spell-levels") {
+    const spellId = url.searchParams.get("spellId");
+    rows = spellId === null ? SPELL_LEVELS : SPELL_LEVELS.filter((n) => n.spellId === Number(spellId));
+  }
+  else if (/^\/spells\/\d+$/.test(url.pathname)) {
+    // Route par chemin : rend un OBJET, pas une enveloppe paginée.
+    const doc = SPELL_DOCS[Number(url.pathname.split("/")[2])];
+    return { ok: Boolean(doc), status: doc ? 200 : 404, json: async () => doc || {} };
+  }
   else if (url.pathname === "/spells") {
-    const breedId = url.searchParams.get("breedId");
-    rows = breedId === null ? SPELLS : SPELLS.filter((s) => s.breedId === Number(breedId));
+    // Comme en production : aucun filtre par classe ne fonctionne ici.
+    return { ok: true, status: 200, json: async () => ({ total: 0, limit: 50, skip: 0, data: [] }) };
   }
   else if (url.pathname === "/items") {
     // Le script interroge un type à la fois (`typeId=<id>`) : la requête

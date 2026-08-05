@@ -167,9 +167,23 @@ c'est la seule forme que cette API accepte de façon fiable. Les deux fausses
 API de test rejettent désormais les filtres groupés, pour que le motif ne
 puisse pas revenir sans être détecté.
 
-La liaison classe → sorts passe par `breedSpellsId`, une liste d'identifiants
-portée par le document de classe — et non par un filtre `breedId` sur
-`/spells`, qui répond sans erreur et sans résultat.
+### Schéma réel des sorts
+
+Établi en interrogeant l'API à la main. Il faut **deux requêtes par sort**, la
+liaison passant par une liste d'identifiants portée par la classe :
+
+| Requête | Contenu |
+|---|---|
+| `/breeds` | `breedSpellsId` : les identifiants de sorts de chaque classe |
+| `/spells/<id>?lang=fr` | Nom et description — route par **chemin**, rend un objet, pas une enveloppe paginée |
+| `/spell-levels?spellId=<id>` | Coût en PA, portée, zone, effets : toutes les données de jeu |
+
+Un filtre `breedId` sur `/spells` répond **sans erreur et sans résultat** — le
+piège qui a coûté deux runs.
+
+**Seul le palier maximal de chaque sort est conservé.** Garder les six paliers
+multiplierait le volume et la complexité sans rien apporter au 1v1 de haut
+niveau, qui est le seul combat visé.
 
 ### Limites connues
 

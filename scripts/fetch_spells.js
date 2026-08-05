@@ -200,35 +200,41 @@ function firstArray(obj, noms) {
 }
 
 /**
- * Récupère des documents UN IDENTIFIANT À LA FOIS.
+ * Récupère un document par son chemin : `/spells/13115?lang=fr`.
  *
- * L'API refuse les filtres groupés : `?id[$in][0..21]=…` répond HTTP 500, tout
- * comme `typeId[$in][0..31]` lors de l'extraction des équipements. La leçon
- * avait été tirée là-bas puis oubliée ici. Une égalité simple par requête est
- * plus bavarde en réseau, mais c'est la seule forme que cette API accepte de
- * façon fiable.
- *
- * Un identifiant introuvable est signalé sans interrompre le reste.
+ * Cette route rend un OBJET, non une enveloppe paginée — d'où un traitement
+ * distinct de `fetchCollection`. C'est aussi la seule forme fiable : l'API
+ * répond HTTP 500 à tout filtre groupé `$in`, comme l'ont montré
+ * `typeId[$in][0..31]` sur les équipements puis `id[$in][0..21]` sur les sorts.
  */
-async function fetchParIdentifiant(resource, ids, opts, reporter) {
-  const out = [];
-  const manquants = [];
-  for (const id of ids) {
-    try {
-      const rows = await fetchCollection(resource, { id: String(id) }, opts, reporter, true);
-      if (rows.length) out.push(...rows);
-      else manquants.push(id);
-    } catch (err) {
-      manquants.push(id);
-      reporter.debug(`${resource} #${id} : ${err.message}`);
-    }
-    if (opts.delay) await sleep(opts.delay);
+async function getOne(resource, id, opts, reporter) {
+  const doc = await getJson(`${API}/${resource}/${id}?lang=${opts.lang}`, opts, reporter);
+  if (doc && Array.isArray(doc.data)) return doc.data[0] || null;
+  return doc || null;
+}
+
+/**
+ * Paliers d'un sort, dans leur collection propre : `/spell-levels?spellId=N`.
+ *
+ * Les données de jeu — coût en PA, portée, zone, effets — vivent ici, tandis
+ * que `/spells/<id>` ne porte que le nom et la description. Il faut donc deux
+ * requêtes par sort.
+ *
+ * SEUL LE PALIER MAXIMAL est conservé : en Kolizéum 1v1 de haut niveau, c'est
+ * celui qui sert, et garder les six multiplierait le volume comme la
+ * complexité sans rien apporter au combat visé.
+ */
+async function paliersDuSort(spellId, opts, reporter) {
+  const rows = await fetchCollection("spell-levels", { spellId: String(spellId) }, opts, reporter, true);
+  if (!rows.length) return null;
+
+  // On trie nous-mêmes plutôt que de dépendre du tri de l'API.
+  let meilleur = null;
+  for (const niveau of rows) {
+    const grade = Number(niveau.grade ?? 0);
+    if (!meilleur || grade > Number(meilleur.grade ?? 0)) meilleur = niveau;
   }
-  if (manquants.length) {
-    reporter.warn(`${manquants.length} ${resource} introuvables : ${manquants.slice(0, 10).join(", ")}`
-      + (manquants.length > 10 ? " …" : ""));
-  }
-  return out;
+  return meilleur;
 }
 
 /**
@@ -248,64 +254,39 @@ function champsPortant(doc, valeurs) {
 }
 
 /**
- * Récupère les sorts d'une classe, sans présumer du schéma.
+ * Identifiants des sorts d'une classe.
  *
- * Trois pistes, dans l'ordre : la liste d'identifiants portée par la classe
- * elle-même, puis les filtres candidats sur /spells, et enfin — si rien ne
- * marche — un échantillon non filtré dont on analyse les champs pour révéler
- * la liaison réelle. Le premier run avait échoué faute de cette dernière
- * étape : « aucun sort renvoyé » sans dire pourquoi.
+ * La liaison passe par `breedSpellsId`, une liste d'identifiants portée par le
+ * document de classe — et non par un filtre sur `/spells`, qui répond sans
+ * erreur et sans résultat. Les autres noms de champ restent tentés au cas où
+ * le schéma évoluerait, et si rien ne sort, la forme brute est exposée plutôt
+ * que de rendre un « aucun sort » muet.
  */
-async function sortsDeLaClasse(classe, opts, reporter, diagnostic) {
-  // Piste 1 — la classe porte-t-elle la liste de ses sorts ?
+async function identifiantsDeLaClasse(classe, opts, reporter, diagnostic) {
   const liste = firstArray(classe.raw, ["breedSpellsId", "spells", "spellIds", "spellsId"]);
   if (liste) {
-    const ids = liste.valeur.map((v) => (v && typeof v === "object" ? v.id : v)).filter(Number.isFinite);
+    const ids = liste.valeur
+      .map((v) => (v && typeof v === "object" ? v.id : v))
+      .filter(Number.isFinite);
     if (ids.length) {
-      reporter.info(`  ${classe.nom} : ${ids.length} identifiants via « ${liste.nom} »`);
-      const rows = await fetchParIdentifiant("spells", ids, opts, reporter);
-      if (rows.length) return rows;
+      reporter.info(`  ${classe.nom} : ${ids.length} sorts listés dans « ${liste.nom} »`);
+      return ids;
     }
   }
 
-  // Piste 2 — filtres candidats sur /spells.
-  for (const champ of ["breedId", "breed", "classId", "characterClassId", "typeId"]) {
-    const rows = await fetchCollection("spells", { [champ]: String(classe.id) }, opts, reporter, true);
-    if (rows.length) {
-      reporter.info(`  ${classe.nom} : ${rows.length} sorts via le filtre « ${champ} »`);
-      return rows;
-    }
-  }
-
-  // Piste 3 — échantillon non filtré, pour découvrir la liaison réelle.
   if (!diagnostic.fait) {
     diagnostic.fait = true;
-    // Une seule page suffit pour inspecter le schéma : inutile de rapatrier
-    // plusieurs milliers de sorts pour lire des noms de champs.
-    const params = new URLSearchParams({ lang: opts.lang, $limit: "5", $skip: "0" });
-    const page = await getJson(`${API}/spells?${params}`, opts, reporter);
-    const echantillon = Array.isArray(page) ? page : page.data || [];
-    const total = Array.isArray(page) ? echantillon.length : (page.total ?? echantillon.length);
-    reporter.warn(
-      `aucun filtre ne relie un sort à sa classe. ${total} sorts existent pourtant sur /spells.`
-    );
-    if (echantillon.length) {
-      const sort = echantillon[0];
-      reporter.info("");
-      reporter.info("Champs d'un sort — pour trouver comment il référence sa classe :");
-      reporter.info(`  ${Object.keys(sort).join(", ")}`);
-      const pistes = champsPortant(sort, diagnostic.idsClasses);
-      reporter.info(pistes.length
-        ? `  Champs portant un identifiant de classe connu : ${pistes.join("  ")}`
-        : "  Aucun champ ne porte d'identifiant de classe connu.");
-      reporter.info(`  ${JSON.stringify(sort).slice(0, 600)}`);
-      reporter.info("");
-      reporter.info("Champs d'une classe — au cas où elle porterait la liste de ses sorts :");
-      reporter.info(`  ${Object.keys(classe.raw).join(", ")}`);
-    }
+    reporter.warn(`aucune liste de sorts sur la classe ${classe.nom}.`);
+    reporter.info("");
+    reporter.info("Champs d'une classe — la liaison vers ses sorts devrait s'y trouver :");
+    reporter.info(`  ${Object.keys(classe.raw).join(", ")}`);
+    const pistes = champsPortant(classe.raw, diagnostic.idsClasses);
+    if (pistes.length) reporter.info(`  Champs portant un identifiant connu : ${pistes.join("  ")}`);
+    reporter.info(`  ${JSON.stringify(classe.raw).slice(0, 600)}`);
   }
   return [];
 }
+
 
 /* ==========================================================================
    Transformation
@@ -457,47 +438,47 @@ async function main() {
   }
   reporter.info(`  classes trouvées : ${voulues.map((c) => `${c.nom} (#${c.id})`).join(", ")}`);
 
-  // 3. Sorts de chaque classe.
+  // 3. Sorts de chaque classe — deux requêtes par sort.
+  //
+  //   /spells/<id>              nom et description
+  //   /spell-levels?spellId=<id>  coût, portée, zone, effets
+  //
+  // Les deux collections sont distinctes : la seconde porte les données de jeu,
+  // la première l'habillage. Seul le palier maximal est retenu.
   const inconnues = new Set();      // formes de zone non décodées
   const nonClasses = new Set();     // effets dont la nature n'est pas confirmée
   const spells = [];
-  let schemaExpose = false;
+  const sansPalier = [];
 
   const diagnostic = { fait: false, idsClasses: new Set(breeds.map((b) => b.id)) };
 
   for (const classe of voulues) {
-    const rawSpells = await sortsDeLaClasse(classe, opts, reporter, diagnostic);
-    if (!rawSpells.length) continue;
+    const ids = await identifiantsDeLaClasse(classe, opts, reporter, diagnostic);
+    let retenus = 0;
 
-    for (const raw of rawSpells) {
-      // Les paliers sont tantôt peuplés, tantôt réduits à des identifiants.
-      const trouve = firstArray(raw, ["spellLevels", "levels", "spellLevelIds"]);
-      if (!trouve) {
-        if (!schemaExpose) {
-          schemaExpose = true;
-          reporter.warn(`sort « ${pickText(raw.name, opts.lang)} » sans paliers exploitables.`);
-          reporter.info("");
-          reporter.info("Champs reçus sur ce sort — à reporter dans le script :");
-          reporter.info(`  ${Object.keys(raw).join(", ")}`);
-          reporter.info(`  ${JSON.stringify(raw).slice(0, 700)}`);
-        }
-        continue;
-      }
+    for (const id of ids) {
+      const doc = await getOne("spells", id, opts, reporter);
+      const niveau = await paliersDuSort(id, opts, reporter);
+      if (!niveau) { sansPalier.push(id); continue; }
 
-      const paliers = trouve.valeur
-        .filter((niv) => niv && typeof niv === "object")
-        .map((niv, i) => transformLevel(niv, niv.grade ?? i + 1, effectMap, reporter, inconnues, nonClasses));
-
-      if (!paliers.length) continue;
+      const palier = transformLevel(niveau, niveau.grade ?? 1, effectMap, reporter, inconnues, nonClasses);
       spells.push({
-        id: raw.id,
-        name: pickText(raw.name, opts.lang),
-        description: pickText(raw.description, opts.lang),
+        id,
+        name: pickText(doc && doc.name, opts.lang) || `sort ${id}`,
+        description: pickText(doc && doc.description, opts.lang),
         class: normalize(classe.nom),
         breedId: classe.id,
-        levels: paliers,
+        levels: [palier],
       });
+      retenus++;
+      if (opts.delay) await sleep(opts.delay);
     }
+    reporter.info(`  ${classe.nom} : ${retenus} sorts retenus`);
+  }
+
+  if (sansPalier.length) {
+    reporter.warn(`${sansPalier.length} sort(s) sans palier sur /spell-levels : ${sansPalier.slice(0, 10).join(", ")}`
+      + (sansPalier.length > 10 ? " …" : ""));
   }
 
   if (!spells.length) {
