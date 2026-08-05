@@ -190,6 +190,20 @@ async function fetchCollection(resource, query, opts, reporter, silent) {
   return out;
 }
 
+/**
+ * Première page d'une collection, avec son total annoncé.
+ *
+ * Sert à SONDER un filtre sans s'engager : une API qui ignore un filtre inconnu
+ * répond la collection entière, et `fetchCollection` la parcourrait jusqu'au
+ * bout. Ici, une requête suffit à voir que le total est aberrant.
+ */
+async function premierePage(resource, query, opts, reporter) {
+  const params = new URLSearchParams({ ...query, lang: opts.lang, $limit: String(opts.pageSize), $skip: "0" });
+  const page = await getJson(`${API}/${resource}?${params}`, opts, reporter);
+  const rows = Array.isArray(page) ? page : page.data || [];
+  return { rows, total: Array.isArray(page) ? rows.length : (page.total ?? rows.length) };
+}
+
 /** Premier champ non vide parmi plusieurs candidats. */
 function firstArray(obj, noms) {
   for (const nom of noms) {
@@ -287,6 +301,228 @@ async function identifiantsDeLaClasse(classe, opts, reporter, diagnostic) {
   return [];
 }
 
+/* ==========================================================================
+   Variantes
+   --------------------------------------------------------------------------
+   Chaque sort du grimoire possède une version alternative : le joueur retient
+   l'une OU l'autre, jamais les deux. `breedSpellsId` ne liste que la première
+   de chaque paire — la seconde existe côté API, mais sous une liaison qui
+   n'est documentée nulle part.
+
+   Plutôt que de parier sur un nom de champ, on essaie trois pistes par ordre
+   de coût croissant et on s'arrête à la première productive. Si aucune ne
+   donne rien, la forme brute des documents est exposée : c'est elle qui porte
+   la réponse, et c'est exactement ce qui a débloqué les deux schémas
+   précédents (bonus de panoplie, puis liaison classe → sorts).
+   ========================================================================== */
+
+/** Noms de collection candidats pour les groupes de variantes. */
+const VARIANT_COLLECTIONS = ["spell-variants", "spellVariants", "spell-variant"];
+
+/** Champs candidats portant la liste des membres d'un groupe. */
+const VARIANT_MEMBER_FIELDS = ["spells", "spellIds", "spellsId", "spellsIds", "variants", "spellVariants"];
+
+/**
+ * Un groupe de variantes compte deux membres, exceptionnellement trois. Au delà
+ * de ce seuil, c'est que le filtre a été ignoré par l'API et qu'on a reçu la
+ * collection entière : mieux vaut abandonner la piste que fabriquer un groupe
+ * de cent sorts.
+ */
+const VARIANT_GROUP_MAX = 6;
+
+function idsDeListe(valeur) {
+  if (!Array.isArray(valeur)) return [];
+  return valeur.map((v) => (v && typeof v === "object" ? v.id : v)).filter(Number.isFinite);
+}
+
+/** Clés d'un document dont le nom évoque une variante. */
+function clesVariante(doc) {
+  return Object.keys(doc || {}).filter((k) => /variant/i.test(k));
+}
+
+/**
+ * Enregistre un groupe s'il est exploitable, membres réordonnés pour que ceux
+ * déjà listés par la classe viennent en tête. Le rang 0 reste ainsi le sort
+ * qu'on extrayait déjà : une extraction plus riche ne doit pas changer le sort
+ * proposé par défaut.
+ */
+function ajouterGroupe(groupes, groupId, membres, connus) {
+  const uniques = [...new Set(membres.filter(Number.isFinite))];
+  if (uniques.length < 2 || uniques.length > VARIANT_GROUP_MAX) return false;
+  const ordonnes = uniques
+    .map((id, rang) => ({ id, rang, connu: connus.has(id) ? 0 : 1 }))
+    .sort((a, b) => a.connu - b.connu || a.rang - b.rang)
+    .map((e) => e.id);
+  for (const id of ordonnes) groupes.set(id, { groupId, membres: ordonnes });
+  return true;
+}
+
+/**
+ * Piste 1 — le document de sort liste lui-même ses variantes.
+ * Gratuite : les documents sont déjà en mémoire.
+ */
+function pisteListeSurSort(ctx) {
+  const groupes = new Map();
+  const champs = new Set();
+  for (const [id, doc] of ctx.docs) {
+    for (const cle of clesVariante(doc)) {
+      const membres = idsDeListe(doc[cle]);
+      if (!membres.length) continue;
+      // La liste inclut parfois le sort lui-même, parfois seulement ses jumeaux.
+      const groupe = membres.includes(id) ? membres : [id, ...membres];
+      if (ajouterGroupe(groupes, groupe[0], groupe, ctx.connus)) champs.add(cle);
+    }
+  }
+  return {
+    source: champs.size ? `champ « ${[...champs].join(", ")} » du document de sort` : null,
+    groupes,
+    note: champs.size
+      ? `liste sur le sort : ${groupes.size} sorts groupés via « ${[...champs].join(", ")} »`
+      : "liste sur le sort : aucun champ « *variant* » ne porte de liste d'identifiants",
+  };
+}
+
+/**
+ * Piste 2 — le document de sort pointe un groupe par un simple nombre.
+ *
+ * Le jumeau ne figurant pas dans `breedSpellsId`, on le retrouve en demandant à
+ * l'API tous les sorts portant la même valeur. Un filtre simple est accepté —
+ * c'est déjà ainsi que fonctionne `/spell-levels?spellId=N` ; seuls les filtres
+ * groupés `$in` font répondre HTTP 500.
+ *
+ * Une sonde valide le filtre avant d'en lancer une vingtaine : si l'API le
+ * renvoie ignoré (toute la collection), la piste est abandonnée au lieu de
+ * fabriquer des groupes absurdes.
+ */
+async function pistePointeurSurSort(ctx) {
+  const parChamp = new Map();          // champ → Map(valeur → ids connus)
+  for (const [id, doc] of ctx.docs) {
+    for (const cle of clesVariante(doc)) {
+      const v = doc[cle];
+      if (!Number.isFinite(v) || v === 0) continue;
+      if (!parChamp.has(cle)) parChamp.set(cle, new Map());
+      const valeurs = parChamp.get(cle);
+      valeurs.set(v, [...(valeurs.get(v) || []), id]);
+    }
+  }
+  if (!parChamp.size) {
+    return { source: null, groupes: new Map(), note: "pointeur sur le sort : aucun champ « *variant* » numérique" };
+  }
+
+  for (const [cle, valeurs] of parChamp) {
+    const groupes = new Map();
+    let filtreUtile = true;
+    for (const [valeur, ids] of valeurs) {
+      let membres = ids;
+      if (filtreUtile) {
+        try {
+          // UNE seule page : un filtre ignoré rendrait la collection entière,
+          // et la parcourir coûterait des milliers de requêtes pour rien.
+          const page = await premierePage("spells", { [cle]: String(valeur) }, ctx.opts, ctx.reporter);
+          const trouves = page.rows.map((r) => r.id).filter(Number.isFinite);
+          if (page.total > VARIANT_GROUP_MAX || !trouves.some((id) => ids.includes(id))) {
+            ctx.reporter.debug(`filtre ${cle}=${valeur} sans effet (${page.total} sorts) — piste abandonnée`);
+            filtreUtile = false;
+          } else if (trouves.length > membres.length) {
+            membres = trouves;
+          }
+        } catch (err) {
+          ctx.reporter.debug(`filtre ${cle}=${valeur} refusé : ${err.message}`);
+          filtreUtile = false;
+        }
+      }
+      ajouterGroupe(groupes, valeur, membres, ctx.connus);
+      if (ctx.opts.delay) await sleep(ctx.opts.delay);
+    }
+    if (groupes.size) {
+      return {
+        source: `champ « ${cle} » du document de sort, résolu par /spells?${cle}=…`,
+        groupes,
+        note: `pointeur sur le sort : ${groupes.size} sorts groupés via « ${cle} »`,
+      };
+    }
+  }
+  return {
+    source: null, groupes: new Map(),
+    note: `pointeur sur le sort : ${[...parChamp.keys()].join(", ")} n'ont produit aucun groupe`,
+  };
+}
+
+/** Piste 3 — une collection dédiée regroupe les variantes. */
+async function pisteCollection(ctx) {
+  const essais = [];
+  for (const resource of VARIANT_COLLECTIONS) {
+    let rows;
+    try {
+      rows = await fetchCollection(resource, {}, ctx.opts, ctx.reporter, true);
+    } catch (err) {
+      essais.push(`/${resource} absente`);
+      continue;
+    }
+    if (!rows.length) { essais.push(`/${resource} vide`); continue; }
+
+    const groupes = new Map();
+    for (const row of rows) {
+      const liste = firstArray(row, VARIANT_MEMBER_FIELDS);
+      if (!liste) continue;
+      const membres = idsDeListe(liste.valeur);
+      if (!membres.some((id) => ctx.connus.has(id))) continue;
+      ajouterGroupe(groupes, row.id ?? membres[0], membres, ctx.connus);
+    }
+    if (groupes.size) {
+      return {
+        source: `/${resource}`,
+        groupes,
+        note: `collection dédiée : ${groupes.size} sorts groupés via /${resource}`,
+      };
+    }
+    // Présente mais inexploitable : montrer sa forme plutôt que de la taire.
+    essais.push(`/${resource} présente (${rows.length} entrées) mais aucun groupe ne contient un sort connu`
+      + ` — champs : ${Object.keys(rows[0]).join(", ")}`);
+  }
+  return { source: null, groupes: new Map(), note: `collection dédiée : ${essais.join(" ; ")}` };
+}
+
+/**
+ * Essaie les pistes dans l'ordre et rend la première productive. Chaque
+ * tentative est consignée : un échec doit rester lisible, pas silencieux.
+ */
+async function decouvrirVariantes(ctx) {
+  const tentatives = [];
+  for (const piste of [pisteListeSurSort, pistePointeurSurSort, pisteCollection]) {
+    const r = await piste(ctx);
+    tentatives.push(r.note);
+    if (r.groupes.size) return { ...r, tentatives };
+  }
+  return { source: null, groupes: new Map(), tentatives };
+}
+
+/**
+ * Aucune piste n'a abouti : exposer les documents bruts. C'est le seul livrable
+ * utile dans ce cas — le prochain run part de là.
+ */
+function diagnosticVariantes(ctx, reporter) {
+  reporter.info("");
+  reporter.info("Variantes introuvables — voici les documents bruts, la liaison s'y trouve :");
+
+  const [idSort, docSort] = [...ctx.docs][0] || [];
+  if (docSort) {
+    reporter.info(`  Champs de /spells/${idSort} :`);
+    reporter.info(`    ${Object.keys(docSort).join(", ")}`);
+    reporter.info(`    ${JSON.stringify(docSort).slice(0, 600)}`);
+  }
+
+  const classe = ctx.voulues[0];
+  if (classe) {
+    // Toute liste de nombres portée par la classe est un candidat : la seconde
+    // série de sorts pourrait y vivre à côté de breedSpellsId.
+    const listes = Object.entries(classe.raw)
+      .map(([cle, v]) => [cle, idsDeListe(v)])
+      .filter(([, ids]) => ids.length >= 2)
+      .map(([cle, ids]) => `${cle} (${ids.length})`);
+    reporter.info(`  Listes de nombres sur la classe ${classe.nom} : ${listes.join(", ") || "aucune"}`);
+  }
+}
 
 /* ==========================================================================
    Transformation
@@ -440,11 +676,15 @@ async function main() {
 
   // 3. Sorts de chaque classe — deux requêtes par sort.
   //
-  //   /spells/<id>              nom et description
+  //   /spells/<id>                nom et description
   //   /spell-levels?spellId=<id>  coût, portée, zone, effets
   //
   // Les deux collections sont distinctes : la seconde porte les données de jeu,
   // la première l'habillage. Seul le palier maximal est retenu.
+  //
+  // Les documents sont rassemblés AVANT les paliers : c'est en eux que se lit
+  // la liaison vers les variantes, et il faut connaître la liste complète des
+  // sorts — jumeaux compris — avant de payer une requête de palier par sort.
   const inconnues = new Set();      // formes de zone non décodées
   const nonClasses = new Set();     // effets dont la nature n'est pas confirmée
   const spells = [];
@@ -452,28 +692,72 @@ async function main() {
 
   const diagnostic = { fait: false, idsClasses: new Set(breeds.map((b) => b.id)) };
 
+  const classeParSort = new Map();   // id de sort → classe
+  const docs = new Map();            // id de sort → document /spells/<id>
+
   for (const classe of voulues) {
     const ids = await identifiantsDeLaClasse(classe, opts, reporter, diagnostic);
-    let retenus = 0;
-
     for (const id of ids) {
-      const doc = await getOne("spells", id, opts, reporter);
-      const niveau = await paliersDuSort(id, opts, reporter);
-      if (!niveau) { sansPalier.push(id); continue; }
-
-      const palier = transformLevel(niveau, niveau.grade ?? 1, effectMap, reporter, inconnues, nonClasses);
-      spells.push({
-        id,
-        name: pickText(doc && doc.name, opts.lang) || `sort ${id}`,
-        description: pickText(doc && doc.description, opts.lang),
-        class: normalize(classe.nom),
-        breedId: classe.id,
-        levels: [palier],
-      });
-      retenus++;
+      if (classeParSort.has(id)) continue;
+      classeParSort.set(id, classe);
+      docs.set(id, await getOne("spells", id, opts, reporter));
       if (opts.delay) await sleep(opts.delay);
     }
-    reporter.info(`  ${classe.nom} : ${retenus} sorts retenus`);
+  }
+
+  // 4. Variantes — la seconde version de chaque sort, absente de breedSpellsId.
+  const ctx = { docs, connus: new Set(docs.keys()), voulues, opts, reporter };
+  const variantes = docs.size ? await decouvrirVariantes(ctx) : { source: null, groupes: new Map(), tentatives: [] };
+
+  const nouveaux = [];
+  for (const [id, groupe] of variantes.groupes) {
+    if (classeParSort.has(id)) continue;
+    // Un membre découvert hérite de la classe de son jumeau : c'est la seule
+    // information de classe dont on dispose pour lui.
+    const jumeau = groupe.membres.find((m) => classeParSort.has(m));
+    if (!jumeau) continue;
+    classeParSort.set(id, classeParSort.get(jumeau));
+    nouveaux.push(id);
+  }
+  for (const id of nouveaux) {
+    docs.set(id, await getOne("spells", id, opts, reporter));
+    if (opts.delay) await sleep(opts.delay);
+  }
+
+  if (variantes.source) {
+    reporter.info(`  variantes : ${variantes.groupes.size} sorts groupés, `
+      + `${nouveaux.length} nouveau(x) — via ${variantes.source}`);
+  } else {
+    reporter.warn("aucune variante trouvée : le grimoire restera sans choix.");
+    for (const note of variantes.tentatives) reporter.info(`    ${note}`);
+    if (docs.size) diagnosticVariantes(ctx, reporter);
+  }
+
+  // 5. Paliers et conversion, sorts listés et variantes confondus.
+  for (const [id, classe] of classeParSort) {
+    const niveau = await paliersDuSort(id, opts, reporter);
+    if (!niveau) { sansPalier.push(id); continue; }
+
+    const doc = docs.get(id);
+    const groupe = variantes.groupes.get(id) || null;
+    const palier = transformLevel(niveau, niveau.grade ?? 1, effectMap, reporter, inconnues, nonClasses);
+    spells.push({
+      id,
+      name: pickText(doc && doc.name, opts.lang) || `sort ${id}`,
+      description: pickText(doc && doc.description, opts.lang),
+      class: normalize(classe.nom),
+      breedId: classe.id,
+      // Un sort sans groupe est seul de son espèce : toujours disponible.
+      variantGroup: groupe ? groupe.groupId : null,
+      variantRank: groupe ? groupe.membres.indexOf(id) : 0,
+      levels: [palier],
+    });
+    if (opts.delay) await sleep(opts.delay);
+  }
+
+  for (const classe of voulues) {
+    const n = spells.filter((s) => s.breedId === classe.id).length;
+    reporter.info(`  ${classe.nom} : ${n} sorts retenus`);
   }
 
   if (sansPalier.length) {
@@ -488,13 +772,22 @@ async function main() {
     );
   }
 
-  // 4. Écriture.
+  // 6. Écriture.
+  const groupesEcrits = new Set(spells.map((s) => s.variantGroup).filter((g) => g != null));
   const payload = {
     meta: {
       source: "dofusdb", apiBase: API, lang: opts.lang,
       generatedAt: new Date().toISOString(),
       classes: voulues.map((c) => ({ id: c.id, nom: c.nom })),
-      counts: { spells: spells.length, effects: Object.keys(effectMap).length },
+      counts: {
+        spells: spells.length,
+        effects: Object.keys(effectMap).length,
+        variantGroups: groupesEcrits.size,
+      },
+      variants: {
+        source: variantes.source,
+        tentatives: variantes.tentatives,
+      },
       warnings: reporter.warnings,
     },
     effects: effectMap,
@@ -509,14 +802,17 @@ async function main() {
     `window.KOLIZEUM_SPELLS = ${JSON.stringify(payload)};\n`
   );
 
-  // 5. Rapport.
+  // 7. Rapport.
   reporter.info("");
   reporter.info(`Écrit : ${path.relative(ROOT, jsonPath)} (${(fs.statSync(jsonPath).size / 1e6).toFixed(2)} Mo)`);
   reporter.info(`Sorts : ${spells.length}`);
   for (const classe of voulues) {
     const n = spells.filter((s) => s.breedId === classe.id).length;
-    reporter.info(`  ${classe.nom} : ${n}`);
+    const seuls = spells.filter((s) => s.breedId === classe.id && s.variantGroup == null).length;
+    reporter.info(`  ${classe.nom} : ${n}` + (seuls ? ` (dont ${seuls} sans variante)` : ""));
   }
+  reporter.info(`Groupes de variantes : ${groupesEcrits.size}`
+    + (variantes.source ? ` — via ${variantes.source}` : ""));
 
   const parKind = {};
   for (const s of spells) {
@@ -558,5 +854,6 @@ if (require.main === module) {
 module.exports = {
   decodeZone, transformEffect, transformLevel, baseEffect,
   firstArray, champsPortant,
-  SPELL_EFFECT_KINDS, ZONE_SHAPES, ELEMENTS,
+  idsDeListe, clesVariante, ajouterGroupe, pisteListeSurSort,
+  SPELL_EFFECT_KINDS, ZONE_SHAPES, ELEMENTS, VARIANT_GROUP_MAX,
 };

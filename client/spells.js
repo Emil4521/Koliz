@@ -49,16 +49,73 @@
 
   function indexData(payload) {
     const spells = (payload && payload.spells) || [];
+    const byClass = spells.reduce((acc, s) => {
+      (acc[s.class] = acc[s.class] || []).push(s);
+      return acc;
+    }, {});
+    const groupsByClass = {};
+    for (const classe of Object.keys(byClass)) groupsByClass[classe] = variantGroups(byClass[classe]);
+
     return {
       meta: (payload && payload.meta) || {},
       effects: (payload && payload.effects) || {},
       spells,
       spellById: new Map(spells.map((s) => [s.id, s])),
-      byClass: spells.reduce((acc, s) => {
-        (acc[s.class] = acc[s.class] || []).push(s);
-        return acc;
-      }, {}),
+      byClass,
+      groupsByClass,
     };
+  }
+
+  /* ========================================================================
+     Variantes
+     ------------------------------------------------------------------------
+     Un sort du grimoire et sa variante s'excluent : on emporte l'un OU
+     l'autre, jamais les deux. Les sorts partageant un `variantGroup` forment
+     donc un groupe dont un seul membre est actif à la fois.
+
+     Un sort dont le groupe est inconnu (`variantGroup: null`) est seul dans le
+     sien et reste toujours actif : tant que l'extraction n'a pas trouvé la
+     liaison, le grimoire se comporte comme avant plutôt que de disparaître.
+     ======================================================================== */
+
+  function variantGroups(spells) {
+    const ordre = [];
+    const par = new Map();
+    for (const s of spells) {
+      const key = s.variantGroup == null ? `solo:${s.id}` : `grp:${s.variantGroup}`;
+      if (!par.has(key)) { par.set(key, { key, spells: [] }); ordre.push(par.get(key)); }
+      par.get(key).spells.push(s);
+    }
+    // Rang 0 en tête : c'est le sort listé par la classe, choisi par défaut.
+    for (const g of ordre) g.spells.sort((a, b) => (a.variantRank || 0) - (b.variantRank || 0));
+    return ordre;
+  }
+
+  /** Sélection par défaut : le sort de rang 0 de chaque groupe. */
+  function defaultSelection(groups) {
+    const sel = new Map();
+    for (const g of groups) sel.set(g.key, g.spells[0].id);
+    return sel;
+  }
+
+  /**
+   * Les sorts réellement emportés : exactement un par groupe. Une sélection
+   * absente ou périmée retombe sur le rang 0 — jamais sur zéro sort.
+   */
+  function activeSpells(groups, selection) {
+    return groups.map((g) => {
+      const id = selection && selection.get(g.key);
+      return g.spells.find((s) => s.id === id) || g.spells[0];
+    });
+  }
+
+  /** Fait tourner la sélection d'un groupe vers le membre suivant. */
+  function cycleVariant(group, selection) {
+    const courant = selection.get(group.key);
+    const i = group.spells.findIndex((s) => s.id === courant);
+    const suivant = group.spells[(i + 1) % group.spells.length];
+    selection.set(group.key, suivant.id);
+    return suivant;
   }
 
   /** Palier d'un sort : le plus haut disponible au niveau du personnage. */
@@ -477,6 +534,7 @@
   return {
     ELEMENT_STATS, ELEMENT_LABELS,
     indexData, levelFor,
+    variantGroups, defaultSelection, activeSpells, cycleVariant,
     zoneCells, canCast, rangeCells,
     computeDamage, makeEntity, effectiveStats, applyDamage,
     castSpell, tickBuffs,

@@ -104,6 +104,8 @@ de [nodejs.org](https://nodejs.org).
 
 - Carte générée, deux combattants placés dans les zones de départ opposées.
 - Sorts de la classe du combattant actif, avec coût en PA, portée et effets.
+- **Choix de variante** : un sort ou son alternative, jamais les deux. La
+  bascule `⇄ 1/2` remplace le sort dans le grimoire au lieu de s'y ajouter.
 - **Aperçu de portée** au choix du sort, **aperçu de la zone d'effet** au survol.
 - Lancer résolu : consommation des PA, coup critique, zone, effets appliqués.
 - **Journal de combat détaillé** — chaque calcul de dégâts est affiché en clair
@@ -184,6 +186,41 @@ piège qui a coûté deux runs.
 **Seul le palier maximal de chaque sort est conservé.** Garder les six paliers
 multiplierait le volume et la complexité sans rien apporter au 1v1 de haut
 niveau, qui est le seul combat visé.
+
+### Variantes de sorts
+
+Chaque sort du grimoire possède une version alternative : on emporte l'une **ou**
+l'autre, jamais les deux. `breedSpellsId` ne liste que la première de chaque
+paire — la seconde existe côté API, mais sous une liaison que rien ne documente.
+
+Plutôt que de parier sur un nom de champ, l'extraction essaie trois pistes par
+ordre de coût croissant et s'arrête à la première productive :
+
+| Piste | Forme cherchée | Coût |
+|---|---|---|
+| Liste sur le sort | un champ `*variant*` du document `/spells/<id>` énumère les jumeaux | nul, les documents sont déjà en mémoire |
+| Pointeur sur le sort | un champ `*variant*` numérique, résolu par `/spells?<champ>=<valeur>` | une requête par groupe |
+| Collection dédiée | `/spell-variants` (ou variantes de nom) regroupe les identifiants | une passe de pagination |
+
+Deux garde-fous, tirés des erreurs précédentes :
+
+- Le filtre du deuxième cas est **sondé sur une seule page**. Une API qui ignore
+  un filtre inconnu rend la collection entière, et la parcourir coûterait des
+  milliers de requêtes pour rien.
+- Un groupe de plus de six membres est **refusé** : c'est le signe d'un filtre
+  ignoré, pas d'un sort à six variantes.
+
+Si aucune piste n'aboutit, l'extraction **réussit quand même** — le grimoire se
+comporte comme avant — mais nomme le manque et affiche les documents bruts :
+champs d'un `/spells/<id>`, listes de nombres portées par la classe. C'est la
+discipline qui avait débloqué les bonus de panoplie puis la liaison
+classe → sorts, et c'est le seul livrable utile quand on cherche encore.
+
+Chaque sort sort avec `variantGroup` et `variantRank`. Le **rang 0 revient au
+sort listé par la classe**, quel que soit l'ordre rendu par l'API : une
+extraction plus riche ne doit pas changer le sort proposé par défaut. Un sort
+dont le groupe est inconnu vaut `variantGroup: null` — seul dans son groupe,
+donc toujours disponible.
 
 ### Limites connues
 

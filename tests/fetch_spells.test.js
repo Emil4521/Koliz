@@ -22,12 +22,12 @@ const { spawnSync } = require("child_process");
 const ROOT = path.join(__dirname, "..");
 const SCRIPT = path.join(ROOT, "scripts", "fetch_spells.js");
 
-function extraire(mock, args) {
+function extraire(mock, args, env) {
   const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "kolizeum-spells-"));
   const run = spawnSync(
     process.execPath,
     ["--require", path.join(__dirname, mock), SCRIPT, "--out", outDir, "--delay", "0", ...(args || [])],
-    { encoding: "utf8", cwd: ROOT }
+    { encoding: "utf8", cwd: ROOT, env: { ...process.env, ...(env || {}) } }
   );
   const fichier = path.join(outDir, "spells.json");
   const payload = fs.existsSync(fichier) ? JSON.parse(fs.readFileSync(fichier, "utf8")) : null;
@@ -39,7 +39,8 @@ function extraire(mock, args) {
   const { run, payload, rapport, outDir } = extraire("mock-api.js");
   assert.strictEqual(run.status, 0, `le script doit réussir :\n${rapport}`);
 
-  assert.strictEqual(payload.spells.length, 4, "sorts conservés");
+  // 4 sorts listés par les classes demandées + 2 variantes qui n'y figuraient pas.
+  assert.strictEqual(payload.spells.length, 6, "sorts conservés");
   assert.ok(/breedSpellsId/.test(rapport), "la liaison passe par breedSpellsId");
   assert.ok(/sans palier/.test(rapport), "un sort sans palier est signalé, pas fatal");
   assert.ok(payload.spells.every((s) => ["iop", "cra"].includes(s.class)),
@@ -84,6 +85,51 @@ function extraire(mock, args) {
 
   assert.ok(/non classés/.test(rapport), "les effets non classés sont listés");
   assert.ok(/Formes de zone non décodées/.test(rapport), "les zones inconnues sont listées");
+
+  /* --- Variantes ---------------------------------------------------------
+     Le jumeau d'un sort ne figure pas dans `breedSpellsId` : sans découverte,
+     la moitié du grimoire manque. Il hérite de la classe de son jumeau, seule
+     information de classe dont il dispose. */
+  const jumeau = payload.spells.find((s) => s.name === "Pression Éclatée");
+  assert.ok(jumeau, "la variante absente de breedSpellsId est ramenée");
+  assert.strictEqual(jumeau.class, "iop", "elle hérite de la classe de son jumeau");
+  assert.strictEqual(jumeau.levels[0].apCost, 5, "avec ses propres données de jeu");
+
+  assert.strictEqual(pression.variantGroup, jumeau.variantGroup, "même groupe");
+  assert.strictEqual(pression.variantRank, 0, "le sort listé par la classe reste le rang 0");
+  assert.strictEqual(jumeau.variantRank, 1, "la variante découverte vient après");
+
+  // Un sort dont le groupe ne compte qu'un membre n'est pas un groupe.
+  assert.strictEqual(puissance.variantGroup, null, "un sort sans jumeau n'a pas de groupe");
+
+  // La variante d'une AUTRE classe suit la sienne.
+  const sombre = payload.spells.find((s) => s.name === "Flèche Sombre");
+  assert.strictEqual(sombre.class, "cra", "la variante Crâ reste chez les Crâ");
+
+  assert.strictEqual(payload.meta.counts.variantGroups, 2, "deux groupes de variantes");
+  assert.ok(/spellVariantId/.test(payload.meta.variants.source), "la liaison trouvée est nommée");
+  fs.rmSync(outDir, { recursive: true, force: true });
+}
+
+/* --- Aucune variante : l'état de production d'avant --------------------------
+   Rien ne relie les sorts entre eux. L'extraction doit RÉUSSIR quand même — le
+   grimoire fonctionne comme avant — mais dire ce qui manque et exposer les
+   documents bruts, puisque c'est là que se trouve la liaison. */
+{
+  const { run, payload, rapport, outDir } =
+    extraire("mock-api.js", null, { KOLIZEUM_MOCK_NO_VARIANTS: "1" });
+  assert.strictEqual(run.status, 0, `l'absence de variante n'est pas fatale :\n${rapport}`);
+
+  assert.strictEqual(payload.spells.length, 4, "seuls les sorts listés par la classe");
+  assert.ok(payload.spells.every((s) => s.variantGroup === null), "aucun groupe");
+  assert.strictEqual(payload.meta.counts.variantGroups, 0, "zéro groupe compté");
+  assert.strictEqual(payload.meta.variants.source, null, "aucune liaison trouvée");
+
+  assert.ok(/aucune variante trouvée/.test(rapport), "le manque est nommé");
+  assert.ok(/Champs de \/spells\//.test(rapport), "les champs d'un sort sont exposés");
+  assert.ok(/Listes de nombres sur la classe/.test(rapport), "les listes de la classe sont exposées");
+  assert.ok(payload.meta.variants.tentatives.length >= 3, "chaque piste tentée est consignée");
+
   fs.rmSync(outDir, { recursive: true, force: true });
 }
 
@@ -100,6 +146,44 @@ function extraire(mock, args) {
   assert.ok(!/\$in/.test(rapport), "aucun filtre groupé n'est employé");
 
   fs.rmSync(outDir, { recursive: true, force: true });
+}
+
+/* --- Piste « liste sur le sort », en unitaire -------------------------------
+   La fausse API exerce la piste du pointeur numérique. L'autre forme plausible
+   — le document de sort listant lui-même ses jumeaux — se teste directement,
+   sans monter une seconde API. */
+{
+  const { pisteListeSurSort, ajouterGroupe, VARIANT_GROUP_MAX } = require("../scripts/fetch_spells.js");
+
+  const ctx = {
+    connus: new Set([10, 20]),
+    docs: new Map([
+      // Liste qui s'inclut elle-même.
+      [10, { id: 10, spellVariants: [10, 11] }],
+      // Liste qui ne cite que les jumeaux : le sort doit s'y ajouter.
+      [20, { id: 20, variantIds: [21] }],
+      // Aucun champ de variante : pas de groupe.
+      [30, { id: 30, name: {} }],
+    ]),
+  };
+  const r = pisteListeSurSort(ctx);
+  assert.ok(r.source, "la piste aboutit");
+  assert.deepStrictEqual(r.groupes.get(10).membres, [10, 11], "groupe reconstitué");
+  assert.deepStrictEqual(r.groupes.get(20).membres, [20, 21], "le sort s'ajoute à sa propre liste");
+  assert.ok(!r.groupes.has(30), "aucun groupe sans liaison");
+
+  // Le rang 0 revient au membre déjà listé par la classe, quel que soit
+  // l'ordre rendu par l'API : le sort proposé par défaut ne doit pas changer
+  // sous prétexte que l'extraction s'est enrichie.
+  const groupes = new Map();
+  ajouterGroupe(groupes, 1, [99, 10], new Set([10]));
+  assert.deepStrictEqual(groupes.get(10).membres, [10, 99], "le sort connu passe en tête");
+
+  // Un « groupe » d'un seul membre n'en est pas un ; un groupe démesuré non
+  // plus — ce serait le signe d'un filtre ignoré par l'API.
+  assert.strictEqual(ajouterGroupe(new Map(), 1, [10], new Set([10])), false, "un membre : refusé");
+  const trop = Array.from({ length: VARIANT_GROUP_MAX + 1 }, (_, i) => 100 + i);
+  assert.strictEqual(ajouterGroupe(new Map(), 1, trop, new Set([100])), false, "groupe démesuré : refusé");
 }
 
 console.log("fetch_spells.test.js : OK");

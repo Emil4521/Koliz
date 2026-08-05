@@ -253,4 +253,58 @@ const carte = () => G.makeMap(grid);
   assert.strictEqual(S.levelFor(spell, 200).level, 6, "niveau 200 : dernier palier");
 }
 
+/* --- Variantes : un sort OU son alternative, jamais les deux ---------------- */
+{
+  const sort = (id, name, groupe, rang) =>
+    ({ id, name, class: "iop", variantGroup: groupe, variantRank: rang, levels: [{ level: 1, apCost: 3 }] });
+
+  const spells = [
+    sort(1, "Pression", 501, 0),
+    sort(2, "Pression Éclatée", 501, 1),
+    sort(3, "Puissance", null, 0),      // sans variante : seule de son groupe
+    sort(4, "Bond", 502, 0),
+    sort(5, "Bond Vif", 502, 1),
+  ];
+
+  const groupes = S.variantGroups(spells);
+  assert.strictEqual(groupes.length, 3, "trois groupes pour cinq sorts");
+  assert.deepStrictEqual(groupes.map((g) => g.spells.length), [2, 1, 2], "tailles des groupes");
+
+  // Un sort sans groupe reste seul dans le sien : tant que l'extraction n'a
+  // pas trouvé la liaison, le grimoire se comporte comme avant.
+  assert.strictEqual(groupes[1].spells[0].name, "Puissance", "le sort sans groupe est isolé");
+
+  // Le rang 0 — celui que la classe liste — est retenu par défaut.
+  const choix = S.defaultSelection(groupes);
+  let actifs = S.activeSpells(groupes, choix);
+  assert.deepStrictEqual(actifs.map((s) => s.name), ["Pression", "Puissance", "Bond"],
+    "par défaut, la variante listée par la classe");
+  assert.strictEqual(actifs.length, groupes.length, "exactement un sort par groupe");
+
+  // Basculer remplace le sort au lieu de s'y ajouter.
+  const retenu = S.cycleVariant(groupes[0], choix);
+  assert.strictEqual(retenu.name, "Pression Éclatée", "la bascule rend le nouveau sort");
+  actifs = S.activeSpells(groupes, choix);
+  assert.deepStrictEqual(actifs.map((s) => s.name), ["Pression Éclatée", "Puissance", "Bond"],
+    "la variante remplace le sort, elle ne s'y ajoute pas");
+  assert.ok(!actifs.some((s) => s.name === "Pression"), "les deux ne coexistent jamais");
+
+  // La bascule est cyclique : on revient au premier.
+  assert.strictEqual(S.cycleVariant(groupes[0], choix).name, "Pression", "cycle fermé");
+
+  // Un groupe d'un seul membre ne bascule sur rien.
+  assert.strictEqual(S.cycleVariant(groupes[1], choix).name, "Puissance", "rien à basculer");
+
+  // Une sélection périmée retombe sur le rang 0 plutôt que sur zéro sort.
+  const perime = new Map([[groupes[0].key, 999]]);
+  assert.deepStrictEqual(S.activeSpells(groupes, perime).map((s) => s.name),
+    ["Pression", "Puissance", "Bond"], "sélection inconnue : repli sur le rang 0");
+  assert.deepStrictEqual(S.activeSpells(groupes, null).map((s) => s.name),
+    ["Pression", "Puissance", "Bond"], "sélection absente : repli sur le rang 0");
+
+  // indexData expose les groupes par classe, prêts à l'emploi.
+  const data = S.indexData({ spells });
+  assert.strictEqual(data.groupsByClass.iop.length, 3, "groupes indexés par classe");
+}
+
 console.log("spells.test.js : OK");

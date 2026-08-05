@@ -115,13 +115,33 @@ const BREEDS = [
   { id: 1, shortName: { fr: "Féca" }, name: { fr: "Féca" }, breedSpellsId: [105] },
 ];
 
+/* Variantes — un sort du grimoire a une version alternative, et on emporte
+   l'une OU l'autre. La liaison passe par `spellVariantId`, résolu en demandant
+   à l'API tous les sorts portant la même valeur : le jumeau ne figure PAS dans
+   `breedSpellsId`, c'est tout le problème que cette extraction résout.
+
+   `KOLIZEUM_MOCK_NO_VARIANTS=1` retire cette liaison pour rejouer l'état de
+   production d'avant : l'extraction doit alors réussir quand même, en le
+   signalant et en exposant les documents bruts. */
+const SANS_VARIANTES = process.env.KOLIZEUM_MOCK_NO_VARIANTS === "1";
+
+function mkSpellDoc(id, name, description, variantId) {
+  const doc = { id, name: { fr: name }, description: { fr: description } };
+  if (variantId != null && !SANS_VARIANTES) doc.spellVariantId = variantId;
+  return doc;
+}
+
 const SPELL_DOCS = {
-  101: { id: 101, name: { fr: "Pression" }, description: { fr: "Frappe de près." } },
-  102: { id: 102, name: { fr: "Puissance" }, description: { fr: "Renforce." } },
-  103: { id: 103, name: { fr: "Flèche Magique" }, description: { fr: "Tire de loin." } },
-  104: { id: 104, name: { fr: "Sort Exotique" }, description: { fr: "Effets variés." } },
-  105: { id: 105, name: { fr: "Armure Féca" }, description: { fr: "Protège." } },
-  106: { id: 106, name: { fr: "Sort Sans Palier" }, description: { fr: "Rien à extraire." } },
+  101: mkSpellDoc(101, "Pression", "Frappe de près.", 501),
+  102: mkSpellDoc(102, "Puissance", "Renforce.", 502),          // seule de son groupe
+  103: mkSpellDoc(103, "Flèche Magique", "Tire de loin.", 503),
+  104: mkSpellDoc(104, "Sort Exotique", "Effets variés."),
+  105: mkSpellDoc(105, "Armure Féca", "Protège."),
+  106: mkSpellDoc(106, "Sort Sans Palier", "Rien à extraire."),
+  // Jumeaux, absents de breedSpellsId : c'est la découverte qui doit les
+  // ramener, sans quoi la moitié du grimoire manque.
+  107: mkSpellDoc(107, "Pression Éclatée", "Variante de zone.", 501),
+  108: mkSpellDoc(108, "Flèche Sombre", "Variante de Flèche Magique.", 503),
 };
 
 function mkLevel(spellId, grade, apCost, minRange, range, effects, extra = {}) {
@@ -154,6 +174,10 @@ const SPELL_LEVELS = [
   ], { zoneDescr: { shape: 90, param1: 1 } }),        // 'Z' : forme non décodée
   mkLevel(105, 6, 3, 0, 0, [[1040, 100, 100]]),
   // Le sort 106 n'a aucun palier : il doit être signalé, pas planté.
+  mkLevel(107, 6, 5, 1, 3, [[97, 30, 34]], {
+    zoneDescr: { shape: 67, param1: 1, param2: 0 },   // 'C' : la variante frappe en zone
+  }),
+  mkLevel(108, 6, 4, 1, 6, [[98, 26, 30]]),
 ];
 
 function paginate(rows, url) {
@@ -185,8 +209,14 @@ globalThis.fetch = async (input) => {
     return { ok: Boolean(doc), status: doc ? 200 : 404, json: async () => doc || {} };
   }
   else if (url.pathname === "/spells") {
-    // Comme en production : aucun filtre par classe ne fonctionne ici.
-    return { ok: true, status: 200, json: async () => ({ total: 0, limit: 50, skip: 0, data: [] }) };
+    // Comme en production : aucun filtre par CLASSE ne fonctionne ici — la
+    // requête aboutit et ne rend rien. Un filtre sur un champ du document,
+    // lui, fonctionne : c'est ainsi qu'on retrouve le jumeau d'un sort.
+    const variantId = url.searchParams.get("spellVariantId");
+    if (variantId === null) {
+      return { ok: true, status: 200, json: async () => ({ total: 0, limit: 50, skip: 0, data: [] }) };
+    }
+    rows = Object.values(SPELL_DOCS).filter((d) => d.spellVariantId === Number(variantId));
   }
   else if (url.pathname === "/items") {
     // Le script interroge un type à la fois (`typeId=<id>`) : la requête
