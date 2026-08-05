@@ -1517,7 +1517,7 @@
     "template": "#1{{~1~2 à }}#2 Dommage{{~ps}}{{~zs}} Pièges",
     "characteristic": 70,
     "operator": null,
-    "statKey": null,
+    "statKey": "domPieges",
     "confidence": "probable"
   },
   "226": {
@@ -2201,7 +2201,7 @@
     "template": "#1{{~1~2 à }}#2 Dommage{{~ps}}{{~zs}} Critiques",
     "characteristic": 86,
     "operator": null,
-    "statKey": null,
+    "statKey": "domCrit",
     "confidence": "probable"
   },
   "419": {
@@ -2210,7 +2210,7 @@
     "template": "-#1{{~1~2 à -}}#2 Dommage{{~ps}}{{~zs}} Critiques",
     "characteristic": 86,
     "operator": null,
-    "statKey": null,
+    "statKey": "domCrit",
     "confidence": "probable"
   },
   "420": {
@@ -2237,7 +2237,7 @@
     "template": "#1{{~1~2 à }}#2 Dommage{{~ps}}{{~zs}} Terre",
     "characteristic": 88,
     "operator": null,
-    "statKey": null,
+    "statKey": "domTerre",
     "confidence": "probable"
   },
   "423": {
@@ -2246,7 +2246,7 @@
     "template": "-#1{{~1~2 à -}}#2 Dommage{{~ps}}{{~zs}} Terre",
     "characteristic": 88,
     "operator": null,
-    "statKey": null,
+    "statKey": "domTerre",
     "confidence": "probable"
   },
   "424": {
@@ -2255,7 +2255,7 @@
     "template": "#1{{~1~2 à }}#2 Dommage{{~ps}}{{~zs}} Feu",
     "characteristic": 89,
     "operator": null,
-    "statKey": null,
+    "statKey": "domFeu",
     "confidence": "probable"
   },
   "425": {
@@ -2264,7 +2264,7 @@
     "template": "-#1{{~1~2 à -}}#2 Dommage{{~ps}}{{~zs}} Feu",
     "characteristic": 89,
     "operator": null,
-    "statKey": null,
+    "statKey": "domFeu",
     "confidence": "probable"
   },
   "426": {
@@ -2273,7 +2273,7 @@
     "template": "#1{{~1~2 à }}#2 Dommage{{~ps}}{{~zs}} Eau",
     "characteristic": 90,
     "operator": null,
-    "statKey": null,
+    "statKey": "domEau",
     "confidence": "probable"
   },
   "427": {
@@ -2282,7 +2282,7 @@
     "template": "-#1{{~1~2 à -}}#2 Dommage{{~ps}}{{~zs}} Eau",
     "characteristic": 90,
     "operator": null,
-    "statKey": null,
+    "statKey": "domEau",
     "confidence": "probable"
   },
   "428": {
@@ -2291,7 +2291,7 @@
     "template": "#1{{~1~2 à }}#2 Dommage{{~ps}}{{~zs}} Air",
     "characteristic": 91,
     "operator": null,
-    "statKey": null,
+    "statKey": "domAir",
     "confidence": "probable"
   },
   "429": {
@@ -2300,7 +2300,7 @@
     "template": "-#1{{~1~2 à -}}#2 Dommage{{~ps}}{{~zs}} Air",
     "characteristic": 91,
     "operator": null,
-    "statKey": null,
+    "statKey": "domAir",
     "confidence": "probable"
   },
   "430": {
@@ -2309,7 +2309,7 @@
     "template": "#1{{~1~2 à }}#2 Dommage{{~ps}}{{~zs}} Neutre",
     "characteristic": 92,
     "operator": null,
-    "statKey": null,
+    "statKey": "domNeutre",
     "confidence": "probable"
   },
   "431": {
@@ -2318,7 +2318,7 @@
     "template": "-#1{{~1~2 à -}}#2 Dommage{{~ps}}{{~zs}} Neutre",
     "characteristic": 92,
     "operator": null,
-    "statKey": null,
+    "statKey": "domNeutre",
     "confidence": "probable"
   },
   "432": {
