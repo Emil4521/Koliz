@@ -20,13 +20,15 @@ Puis ouvrir directement dans un navigateur (aucun serveur nécessaire) :
 |---|---|---|
 | `client/index.html` | v0.1 | Grille tactique, distance, ligne de vue |
 | `client/equipment.html` | v0.2 | Catalogue d'équipement, jets, panoplies, statistiques |
+| `client/spells.html` | v0.3 | Banc d'essai des sorts : zones, portée, dégâts, journal |
 
 Pour les **données officielles** (nécessite un accès à `api.dofusdb.fr`) :
 
 ```bash
-node scripts/fetch_items.js             # extraction complète
-node scripts/fetch_items.js --max 200   # échantillon rapide
-node scripts/fetch_items.js --help      # options
+node scripts/fetch_items.js             # équipements, extraction complète
+node scripts/fetch_items.js --max 200   # équipements, échantillon rapide
+node scripts/fetch_spells.js            # sorts du Iop et du Crâ
+node scripts/fetch_spells.js --classes iop,cra,eniripsa
 ```
 
 Le script écrit `client/data/items.json` et sa variante `items.data.js`, qui
@@ -84,6 +86,82 @@ s'ouvrent et fonctionnent dès la décompression, sur le jeu fictif.
 Node n'est nécessaire que pour lancer l'extraction ou les tests en local. Sous
 Windows : `winget install OpenJS.NodeJS.LTS` dans PowerShell, ou l'installeur
 de [nodejs.org](https://nodejs.org).
+
+---
+
+## Version 0.3 — sorts et interpréteur d'effets
+
+### Livrables
+
+| Fichier | Rôle |
+|---|---|
+| `client/grid.js` | Géométrie, ligne de vue et génération de carte, extraites de la v0.1 |
+| `scripts/fetch_spells.js` | Extraction des sorts DofusDB → `spells.json` |
+| `client/spells.js` | Zones, conditions de lancer, formule de dégâts, interpréteur |
+| `client/spells.html` | Banc d'essai : deux combattants, sorts, journal de combat |
+
+### Ce que fait le banc d'essai
+
+- Carte générée, deux combattants placés dans les zones de départ opposées.
+- Sorts de la classe du combattant actif, avec coût en PA, portée et effets.
+- **Aperçu de portée** au choix du sort, **aperçu de la zone d'effet** au survol.
+- Lancer résolu : consommation des PA, coup critique, zone, effets appliqués.
+- **Journal de combat détaillé** — chaque calcul de dégâts est affiché en clair
+  (`18 × (1 + 100%) = 36 → 36, puis −0% → 36`), pour pouvoir comparer au jeu
+  ligne à ligne plutôt que de constater un total qui ne tombe pas juste.
+- Fin de tour : passage de main, régénération des PA/PM, expiration des buffs.
+
+### Formule de dégâts
+
+```
+base   = jet du sort
+bruts  = base × (1 + (caractéristique + puissance + %dommages) / 100)
+         + dommages fixes de l'élément + dommages fixes génériques
+         [+ dommages critiques si le coup est critique]
+finaux = bruts × (1 − résistance% cible / 100) − résistance fixe cible
+```
+
+Arrondi à l'entier inférieur à chaque étape, jamais négatif. Chaque élément
+puise dans sa caractéristique — Terre/Force, Feu/Intelligence, Eau/Chance,
+Air/Agilité, Neutre/Force.
+
+**À confirmer contre le jeu** : l'ordre exact des arrondis, et le fait que les
+dommages critiques s'ajoutent aux dégâts bruts *avant* l'application des
+résistances.
+
+### Classification des effets de sort
+
+La nature d'un effet ne se déduit pas de son libellé : « dommages Terre » (effet
+de sort) et « Dommage Terre » (bonus fixe d'équipement) se normalisent en la
+même chaîne. La classification se fait donc par **identifiant**, et ces
+identifiants proviennent de la table d'effets réellement téléchargée, où deux
+familles indépendantes se recoupent dans le même ordre d'éléments :
+
+| Identifiants | Nature |
+|---|---|
+| 96 – 100 | Dommages (Eau, Terre, Air, Feu, Neutre) |
+| 91 – 95 | Vol de vie, mêmes éléments |
+| 81 | Soins |
+| 1040 | Bouclier |
+| 410 – 413 | Retrait PA / PM |
+| 5, 6 | Poussée / attirance |
+
+Le libellé attendu est conservé pour recoupement : si l'API répond autre chose
+à l'un de ces identifiants, l'extraction le signale et **suspend** la
+classification au lieu de l'appliquer.
+
+Un effet dont la nature n'est pas confirmée sort avec `kind: null`. Il est
+alors affiché dans la fiche du sort avec un ⚠ et **journalisé comme non
+appliqué** au moment du lancer — jamais deviné.
+
+### Limites connues
+
+- Le **déplacement forcé** (poussée, attirance) est journalisé mais pas encore
+  résolu sur la grille : déplacer au hasard serait pire que ne rien faire.
+- Les **formes de zone** non décodées se replient sur la case visée et le
+  signalent, plutôt que d'inventer une surface.
+- Le banc d'essai utilise des statistiques fixes ; le raccordement à la page
+  d'équipement viendra avec la v1.0.
 
 ---
 
@@ -190,6 +268,7 @@ hypothèse.
 | `tests/grid.test.js` | Géométrie et LDV de la v0.1, extraites du livrable HTML |
 | `tests/items.test.js` | Jets, emplacements, statistiques, panoplies |
 | `tests/fetch_items.test.js` | `fetch_items.js` de bout en bout contre une fausse API DofusDB |
+| `tests/spells.test.js` | Zones, conditions de lancer, formule de dégâts, interpréteur |
 
 L'interface d'équipement a par ailleurs été vérifiée dans un navigateur
 (équipement, filtres, relance des jets, export/import, effets non cumulés).
@@ -334,8 +413,7 @@ diagonaux passant par les coins (le cas discriminant pour la règle des cellules
 
 ## Suite de la feuille de route
 
-Version 0.3 — sorts du Iop et du Crâ : `scripts/fetch_spells.js`, format
-déclaratif des sorts, interpréteur d'effets (`damage`, `heal`, `boost`,
-`state`, `shield`) et interface de test sur la grille.
+Version 1.0 — combat complet 1v1 : système de tours, déplacement,
+raccordement de l'équipement au combat, condition de victoire.
 
 Voir [`docs/brief.md`](docs/brief.md) pour le détail des jalons.

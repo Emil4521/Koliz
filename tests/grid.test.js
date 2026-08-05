@@ -1,44 +1,58 @@
 /**
  * Tests de la géométrie de la grille et de la ligne de vue (v0.1).
  *
- * Le livrable v0.1 est un fichier HTML autonome : on en extrait les sections
- * de calcul (géométrie, LDV, génération de carte) pour les exécuter sous Node,
- * sans navigateur. Les sections de rendu et d'interface sont écartées.
+ * `client/grid.js` étant un module autonome, il est chargé directement : plus
+ * besoin d'extraire le code du fichier HTML, comme c'était le cas quand tout
+ * le livrable v0.1 tenait dans une seule page.
  */
 
 "use strict";
 
-const fs = require("fs");
-const path = require("path");
 const assert = require("assert");
+const G = require("../client/grid.js");
 
-const HTML = path.join(__dirname, "..", "client", "index.html");
 
-function loadCore() {
-  const html = fs.readFileSync(HTML, "utf8");
-  const script = html.split("<script>")[1].split("</script>")[0];
-  const startRender = script.lastIndexOf("/* ====", script.indexOf("   4. RENDU CANVAS"));
-  const startTests = script.lastIndexOf("/* ====", script.indexOf("   6. AUTO-TESTS"));
-  const code = script.slice(0, startRender) + script.slice(startTests);
-
-  const sandbox = {};
-  const exposed = [
-    "makeGrid", "cellDistance", "traversedCells", "lineOfSight", "makeMap",
-    "generateMap", "neighbors", "selfTest", "CELL_FREE", "CELL_WALL", "CELL_HOLE",
-  ];
-  const factory = new Function(
-    `${code.replace(/\nselfTest\(\);[\s\S]*$/, "\n")}\nreturn {${exposed.join(",")}};`
-  );
-  return Object.assign(sandbox, factory());
-}
-
-const G = loadCore();
 const rand = (n) => (Math.random() * n) | 0;
 
-/* --- Auto-tests embarqués dans le livrable --------------------------------- */
+/* --- Règle Ankama des cellules « à moitié traversées » ---------------------
+   Sur une diagonale parfaite, le rayon passe pile par les coins de deux
+   cellules voisines. En mode strict elles comptent comme traversées et
+   bloquent ; en mode permissif elles sont ignorées. C'est LA subtilité que le
+   jalon devait reproduire. */
 {
-  const fails = G.selfTest();
-  assert.deepStrictEqual(fails, [], `auto-tests du livrable : ${fails.join(" | ")}`);
+  const g = G.makeGrid(14, 20);
+  const m = G.makeMap(g);
+  const at = (x, y) => g.coordToId(x, y);
+
+  const strictes = G.traversedCells(g, { x: 5, y: 5 }, { x: 7, y: 7 }, true)
+    .map((c) => `${c.x},${c.y}`);
+  assert.ok(strictes.includes("6,5") && strictes.includes("5,6"), "coins comptés en mode strict");
+
+  const permissives = G.traversedCells(g, { x: 5, y: 5 }, { x: 7, y: 7 }, false)
+    .map((c) => `${c.x},${c.y}`);
+  assert.ok(!permissives.includes("6,5") && !permissives.includes("5,6"),
+    "coins ignorés en mode permissif");
+
+  m.cells[at(6, 5)] = G.CELL_WALL;
+  assert.ok(!G.lineOfSight(g, m, at(5, 5), at(7, 7), true).clear, "coin bloquant en strict");
+  assert.ok(G.lineOfSight(g, m, at(5, 5), at(7, 7), false).clear, "coin non bloquant en permissif");
+  m.cells[at(6, 5)] = G.CELL_FREE;
+
+  // La cible ne se masque jamais elle-même.
+  m.cells[at(9, 5)] = G.CELL_WALL;
+  assert.ok(G.lineOfSight(g, m, at(5, 5), at(9, 5), true).clear, "cible non bloquante");
+  m.cells[at(9, 5)] = G.CELL_FREE;
+
+  // Bordure de carte : le rayon effleure des cellules hors grille sans bloquer.
+  assert.ok(G.lineOfSight(g, m, 0, g.W - 1, true).clear, "LDV le long de la rangée du haut");
+  assert.ok(G.lineOfSight(g, m, g.size - g.W, g.size - 1, true).clear, "LDV le long de la rangée du bas");
+
+  // Les quatre voisins d'une cellule intérieure sont à distance 1.
+  const mid = at(10, 5);
+  assert.strictEqual(G.neighbors(g, mid).length, 4, "quatre voisins");
+  for (const nb of G.neighbors(g, mid)) {
+    assert.strictEqual(G.cellDistance(g.idToCoord(mid), g.idToCoord(nb)), 1, "voisin à distance 1");
+  }
 }
 
 /* --- Bijection identifiant ↔ coordonnées ----------------------------------- */

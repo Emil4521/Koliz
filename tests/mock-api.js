@@ -90,6 +90,71 @@ const SETS = [
   },
 ];
 
+
+/* ---------------------------------------------------------------------------
+   Sorts : classes, sorts et paliers, au schéma supposé de DofusDB.
+   --------------------------------------------------------------------------- */
+
+const BREEDS = [
+  { id: 7, shortName: { fr: "Iop" }, name: { fr: "Iop" } },
+  { id: 9, shortName: { fr: "Crâ" }, name: { fr: "Crâ" } },
+  { id: 1, shortName: { fr: "Féca" }, name: { fr: "Féca" } },
+];
+
+function mkLevel(grade, apCost, minRange, range, effects, extra = {}) {
+  return {
+    grade, apCost, minRange, range,
+    castTestLos: true, rangeCanBeBoosted: false,
+    criticalHitProbability: 30, maxCastPerTurn: 2, minPlayerLevel: grade * 10,
+    zoneDescr: { shape: 80, param1: 0, param2: 0 },   // 'P' : case unique
+    effects: effects.map(([effectId, diceNum, diceSide, duration]) =>
+      ({ effectId, diceNum, diceSide, value: 0, duration: duration || 0 })),
+    criticalEffects: [],
+    ...extra,
+  };
+}
+
+const SPELLS = [
+  {
+    id: 101, breedId: 7, name: { fr: "Pression" }, description: { fr: "Frappe de près." },
+    spellLevels: [
+      mkLevel(1, 4, 1, 1, [[97, 2, 15]]),
+      mkLevel(6, 4, 1, 1, [[97, 16, 20]]),
+    ],
+  },
+  {
+    id: 102, breedId: 7, name: { fr: "Puissance" }, description: { fr: "Renforce." },
+    spellLevels: [
+      // Boost : statistique + durée non nulle.
+      mkLevel(6, 2, 0, 0, [[118, 40, 40, 3]]),
+    ],
+  },
+  {
+    id: 103, breedId: 9, name: { fr: "Flèche Magique" }, description: { fr: "Tire de loin." },
+    spellLevels: [
+      mkLevel(6, 4, 1, 8, [[98, 21, 25]], {
+        rangeCanBeBoosted: true,
+        zoneDescr: { shape: 67, param1: 2, param2: 0 },   // 'C' : disque de 2
+      }),
+    ],
+  },
+  {
+    id: 104, breedId: 9, name: { fr: "Sort Exotique" }, description: { fr: "Effets variés." },
+    spellLevels: [
+      mkLevel(6, 3, 1, 4, [
+        [81, 10, 20],        // soins
+        [1040, 50, 50],      // bouclier
+        [412, 1, 2],         // retrait PM
+        [9999, 1, 1],        // effet inconnu : doit rester non classé
+      ], { zoneDescr: { shape: 90, param1: 1 } }),   // 'Z' : forme non décodée
+    ],
+  },
+  // Sort d'une classe non demandée : ne doit pas être extrait.
+  { id: 105, breedId: 1, name: { fr: "Armure Féca" }, spellLevels: [mkLevel(6, 3, 0, 0, [[1040, 100, 100]])] },
+  // Sort sans paliers exploitables : doit déclencher le diagnostic.
+  { id: 106, breedId: 7, name: { fr: "Sort Cassé" }, spellLevels: [] },
+];
+
 function paginate(rows, url) {
   const limit = Number(url.searchParams.get("$limit") || 50);
   const skip = Number(url.searchParams.get("$skip") || 0);
@@ -102,6 +167,11 @@ globalThis.fetch = async (input) => {
   if (url.pathname === "/item-types") rows = TYPES;
   else if (url.pathname === "/effects") rows = EFFECTS;
   else if (url.pathname === "/item-sets") rows = SETS;
+  else if (url.pathname === "/breeds") rows = BREEDS;
+  else if (url.pathname === "/spells") {
+    const breedId = url.searchParams.get("breedId");
+    rows = breedId === null ? SPELLS : SPELLS.filter((s) => s.breedId === Number(breedId));
+  }
   else if (url.pathname === "/items") {
     // Le script interroge un type à la fois (`typeId=<id>`) : la requête
     // groupée `typeId[$in][0..31]` fait répondre la vraie API en HTTP 500.

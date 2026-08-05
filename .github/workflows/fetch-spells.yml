@@ -1,0 +1,92 @@
+name: Extraire les sorts (DofusDB)
+
+# Déclenchement manuel uniquement, comme pour les équipements : l'extraction
+# interroge une API tierce et écrit dans le dépôt.
+#
+# Voir .github/workflows/fetch-items.yml pour le même mécanisme appliqué aux
+# équipements — et le README pour le piège du bouton « Re-run jobs », qui
+# rejoue le commit figé du run au lieu de la dernière version de la branche.
+on:
+  workflow_dispatch:
+    inputs:
+      classes:
+        description: "Classes à extraire, séparées par des virgules"
+        type: string
+        default: "iop,cra"
+      lang:
+        description: "Langue des libellés"
+        type: choice
+        options: ["fr", "en", "es", "de"]
+        default: "fr"
+      commit:
+        description: "Commiter les données dans le dépôt"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  extraire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Vérifier la suite de tests
+        run: npm test
+
+      - name: Extraire les sorts
+        run: |
+          set -o pipefail
+          echo "Classes : ${{ inputs.classes }}"
+          node scripts/fetch_spells.js --lang ${{ inputs.lang }} --classes "${{ inputs.classes }}" 2>&1 | tee extraction.log
+
+      - name: Publier le rapport d'extraction
+        if: always()
+        run: |
+          {
+            echo "## Rapport d'extraction des sorts"
+            echo ""
+            echo "Les effets non classés et les formes de zone non décodées sont listés"
+            echo "ci-dessous. Chacun se corrige dans les tables en tête de"
+            echo "\`scripts/fetch_spells.js\` — \`SPELL_EFFECT_KINDS\` et \`ZONE_SHAPES\`."
+            echo ""
+            echo '```'
+            tr '\r' '\n' < extraction.log \
+              | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' \
+              | grep -v '^[[:space:]]*$' \
+              | tail -70
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commiter les données
+        if: inputs.commit && success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add client/data/spells.json client/data/spells.data.js
+          if git diff --staged --quiet; then
+            echo "Aucun changement dans les données — rien à commiter."
+            exit 0
+          fi
+          git commit \
+            -m "données : extraction des sorts DofusDB (${{ inputs.classes }})" \
+            -m "Généré par le workflow fetch-spells depuis scripts/fetch_spells.js." \
+            -m "Run : ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          git push
+
+      - name: Conserver les données en artefact
+        if: always() && hashFiles('client/data/spells.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: spells-${{ inputs.lang }}
+          path: |
+            client/data/spells.json
+            client/data/spells.data.js
+          retention-days: 14

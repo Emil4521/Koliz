@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kolizéum — v0.3 — Banc d'essai des sorts</title>
+<style>
+  :root {
+    --bg: #14171d; --panel: #1c2029; --panel-2: #232833; --line: #333a47;
+    --text: #dfe4ec; --muted: #8f9aad; --accent: #5aa9e6;
+    --ok: #4cc38a; --ko: #e5484d; --warn: #f5a524; --exo: #b39ddb;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    flex: 0 0 auto; background: var(--panel); border-bottom: 1px solid var(--line);
+    padding: 10px 16px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  h1 { font-size: 15px; margin: 0; }
+  h1 span { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .muted { color: var(--muted); }
+  button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 5px; padding: 5px 10px; font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: #fff; }
+  button.primary { background: #24486a; border-color: #2f6595; }
+  select, input[type=number] {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 4px; padding: 4px 7px; font: inherit;
+  }
+  #banner {
+    flex: 0 0 auto; padding: 7px 16px; font-size: 12px;
+    background: #3a2418; border-bottom: 1px solid #6b3f22; color: #f0c9a0;
+  }
+  #banner.hidden { display: none; }
+  #banner b { color: var(--warn); }
+
+  #cols { flex: 1 1 auto; display: flex; min-height: 0; }
+  .col { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  #colLeft { flex: 0 0 300px; border-right: 1px solid var(--line); }
+  #colBoard { flex: 1 1 auto; border-right: 1px solid var(--line); }
+  #colLog { flex: 0 0 380px; }
+  .col > h2 {
+    flex: 0 0 auto; margin: 0; padding: 9px 14px; font-size: 11px;
+    text-transform: uppercase; letter-spacing: .09em; color: var(--muted);
+    background: var(--panel); border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; gap: 8px;
+  }
+  .col > .body { flex: 1 1 auto; overflow: auto; padding: 10px; }
+  #stage { padding: 14px; }
+  canvas { display: block; cursor: crosshair; }
+
+  /* --- Entités --- */
+  .ent { border: 1px solid var(--line); border-radius: 6px; margin-bottom: 8px; background: var(--panel); }
+  .ent.active { border-color: var(--accent); }
+  .ent .head {
+    display: flex; align-items: center; gap: 8px; padding: 6px 9px;
+    background: var(--panel-2); cursor: pointer;
+  }
+  .ent .head b { flex: 1 1 auto; }
+  .ent .body2 { padding: 7px 9px; }
+  .bar { height: 12px; border-radius: 3px; background: #2b313d; overflow: hidden; margin: 3px 0; position: relative; }
+  .bar i { display: block; height: 100%; }
+  .bar .vie { background: var(--ok); }
+  .bar .bouclier { background: #7aa7d0; }
+  .bar span {
+    position: absolute; inset: 0; text-align: center;
+    font: 10px ui-monospace, monospace; line-height: 12px; color: #0b0d11;
+  }
+  .papm { display: flex; gap: 10px; font: 12px ui-monospace, monospace; margin-top: 4px; }
+  .papm b { color: var(--accent); }
+  .buffs { margin-top: 5px; font: 11px ui-monospace, monospace; color: var(--exo); }
+
+  /* --- Sorts --- */
+  .spell {
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px;
+    margin-bottom: 5px; background: var(--panel); cursor: pointer;
+  }
+  .spell:hover { border-color: var(--accent); }
+  .spell.on { border-color: var(--accent); background: #1b2735; }
+  .spell.ko { opacity: .45; }
+  .spell .t { display: flex; align-items: baseline; gap: 7px; }
+  .spell .t b { flex: 1 1 auto; }
+  .spell .meta { color: var(--muted); font: 11px ui-monospace, monospace; }
+  .spell .fx { margin: 3px 0 0; padding: 0; list-style: none; font: 11px ui-monospace, monospace; }
+  .spell .fx li { color: var(--muted); }
+  .spell .fx li.unk { color: var(--warn); }
+
+  /* --- Journal --- */
+  #log { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #log div { padding: 3px 6px; border-bottom: 1px solid #232833; }
+  #log .cast { color: var(--accent); }
+  #log .damage { color: #ffb3b3; }
+  #log .heal { color: var(--ok); }
+  #log .shield { color: #9ec5e8; }
+  #log .boost { color: var(--exo); }
+  #log .drain { color: var(--warn); }
+  #log .mort { color: var(--ko); font-weight: 600; }
+  #log .refus, #log .avertissement, #log .non-applique { color: var(--warn); }
+  #log .info { color: var(--muted); }
+  #log .tour { color: #fff; background: #232833; }
+  .empty-msg { color: var(--muted); text-align: center; padding: 26px 10px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Kolizéum <span>— v0.3 · banc d'essai des sorts</span></h1>
+  <span id="provenance" class="muted"></span>
+  <span style="flex:1 1 auto"></span>
+  <label class="muted">Niveau <input type="number" id="level" min="1" max="200" value="200" style="width:64px"></label>
+  <button id="btnTurn" class="primary">Fin de tour</button>
+  <button id="btnReset">Réinitialiser</button>
+  <button id="btnMap">Nouvelle carte</button>
+</header>
+
+<div id="banner" class="hidden"></div>
+
+<div id="cols">
+  <div class="col" id="colLeft">
+    <h2><span>Combattants</span><span id="turnInfo" class="muted"></span></h2>
+    <div class="body">
+      <div id="entities"></div>
+      <h2 style="margin:12px -10px 8px; border-top:1px solid var(--line)">
+        <span id="spellTitle">Sorts</span>
+      </h2>
+      <div id="spells"></div>
+    </div>
+  </div>
+
+  <div class="col" id="colBoard">
+    <h2><span>Terrain</span><span id="hint" class="muted"></span></h2>
+    <div class="body" id="stage"><canvas id="cv"></canvas></div>
+  </div>
+
+  <div class="col" id="colLog">
+    <h2><span>Journal de combat</span><button id="btnClearLog" style="padding:1px 7px">Vider</button></h2>
+    <div class="body" id="log"></div>
+  </div>
+</div>
+
+<script src="grid.js"></script>
+<script src="spells.js"></script>
+<script src="data/spells.data.js" onerror="window.KOLIZEUM_SPELLS_MISSING = true"></script>
+<script>
+"use strict";
+
+const G = Kolizeum.Grid;
+const S = Kolizeum.Spells;
+const $ = (id) => document.getElementById(id);
+
+const COLORS = {
+  freeA: "#2b313d", freeB: "#262c37", wall: "#59616f", hole: "#0d0f14",
+  edge: "#1a1e26", portee: "rgba(90,169,230,0.20)", zone: "rgba(245,165,36,0.38)",
+  hover: "rgba(255,255,255,0.12)",
+  equipes: { a: "#4cc38a", b: "#e5484d" },
+};
+
+const state = {
+  data: null, grid: null, map: null,
+  entities: [], actifId: null, spellChoisi: null,
+  hoverCell: -1, level: 200,
+  hw: 22, hh: 11, dpr: 1,
+};
+
+/* ==========================================================================
+   Mise en place
+   ========================================================================== */
+
+function nouvelleCarte(graine) {
+  state.grid = G.makeGrid(14, 20);
+  state.map = G.generateMap(state.grid, graine || String(Math.floor(Math.random() * 1e6)), 12);
+
+  const zoneA = [...state.map.startA], zoneB = [...state.map.startB];
+  const [a, b] = state.entities;
+  a.cellId = zoneA[Math.floor(zoneA.length / 2)];
+  b.cellId = zoneB[Math.floor(zoneB.length / 2)];
+  layout();
+}
+
+/**
+ * Deux combattants aux statistiques volontairement simples : le banc d'essai
+ * sert à valider les sorts, pas à équilibrer des builds. Les statistiques
+ * réelles viendront de la page d'équipement quand les deux seront reliées.
+ */
+function creerEntites() {
+  const classes = Object.keys(state.data.byClass);
+  const classeA = classes[0] || "iop";
+  const classeB = classes[1] || classeA;
+
+  state.entities = [
+    S.makeEntity({
+      id: "a", name: capitalise(classeA), team: "a", cellId: 0, maxLife: 1000, pa: 6, pm: 3,
+      stats: { force: 100, intelligence: 100, chance: 100, agilite: 100, pa: 6, pm: 3, critPct: 0 },
+    }),
+    S.makeEntity({
+      id: "b", name: capitalise(classeB), team: "b", cellId: 1, maxLife: 1000, pa: 6, pm: 3,
+      stats: { force: 100, intelligence: 100, chance: 100, agilite: 100, pa: 6, pm: 3, critPct: 0 },
+    }),
+  ];
+  state.entities[0].classe = classeA;
+  state.entities[1].classe = classeB;
+  state.actifId = "a";
+}
+
+const capitalise = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const actif = () => state.entities.find((e) => e.id === state.actifId);
+const occupants = () => new Map(state.entities.filter((e) => e.life > 0).map((e) => [e.cellId, e]));
+
+/* ==========================================================================
+   Rendu
+   ========================================================================== */
+
+const cv = $("cv");
+const ctx = cv.getContext("2d");
+
+function layout() {
+  const { width, height } = G.boardSize(state.grid, state.hw, state.hh);
+  state.dpr = window.devicePixelRatio || 1;
+  cv.width = Math.ceil(width * state.dpr);
+  cv.height = Math.ceil(height * state.dpr);
+  cv.style.width = width + "px";
+  cv.style.height = height + "px";
+  render();
+}
+
+function diamant(px, py, inset) {
+  const hw = state.hw - inset, hh = state.hh - inset * 0.5;
+  ctx.beginPath();
+  ctx.moveTo(px, py - hh); ctx.lineTo(px + hw, py);
+  ctx.lineTo(px, py + hh); ctx.lineTo(px - hw, py);
+  ctx.closePath();
+}
+
+function remplir(id, couleur, inset) {
+  const { px, py } = G.cellCenter(state.grid.idToCoord(id), state.hw, state.hh);
+  diamant(px, py, inset == null ? 0.5 : inset);
+  ctx.fillStyle = couleur;
+  ctx.fill();
+}
+
+function dessiner() {
+  const { grid, map } = state;
+  ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+
+  for (let id = 0; id < grid.size; id++) {
+    const { r, c } = grid.idToRC(id);
+    const kind = map.cells[id];
+    const couleur = kind === CELL.hole ? COLORS.hole
+      : kind === CELL.wall ? COLORS.wall
+      : ((r + c) & 1) ? COLORS.freeA : COLORS.freeB;
+    const { px, py } = G.cellCenter(grid.idToCoord(id), state.hw, state.hh);
+    diamant(px, py, 0.5);
+    ctx.fillStyle = couleur; ctx.fill();
+    ctx.strokeStyle = COLORS.edge; ctx.lineWidth = 1; ctx.stroke();
+  }
+
+  // Portée du sort choisi, puis zone d'effet sous le curseur.
+  const niveau = niveauChoisi();
+  if (niveau) {
+    for (const id of S.rangeCells(grid, map, actif(), niveau, {
+      occupants: occupants(), rangeBonus: actif().stats.po || 0,
+    })) remplir(id, COLORS.portee, 1);
+
+    if (state.hoverCell >= 0) {
+      const verdict = S.canCast(grid, map, actif(), niveau, state.hoverCell, {
+        occupants: occupants(), rangeBonus: actif().stats.po || 0,
+      });
+      if (verdict.ok) {
+        const zone = (niveau.zones && niveau.zones[0]) || { type: "point", size: 0 };
+        for (const id of S.zoneCells(grid, actif().cellId, state.hoverCell, zone)) {
+          remplir(id, COLORS.zone, 1);
+        }
+      }
+    }
+  }
+
+  if (state.hoverCell >= 0) remplir(state.hoverCell, COLORS.hover, 1);
+
+  for (const e of state.entities) {
+    const { px, py } = G.cellCenter(grid.idToCoord(e.cellId), state.hw, state.hh);
+    diamant(px, py, 2);
+    ctx.fillStyle = COLORS.equipes[e.team];
+    ctx.globalAlpha = e.life > 0 ? 0.9 : 0.3;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#0b0d11";
+    ctx.font = `bold ${Math.max(9, Math.round(state.hw * 0.6))}px ui-sans-serif, system-ui`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(e.name.charAt(0).toUpperCase(), px, py);
+    if (e.id === state.actifId) {
+      diamant(px, py, 1);
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
+    }
+  }
+}
+
+const CELL = { free: G.CELL_FREE, wall: G.CELL_WALL, hole: G.CELL_HOLE };
+
+/* ==========================================================================
+   Panneaux
+   ========================================================================== */
+
+function el(tag, cls, txt) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (txt != null) n.textContent = txt;
+  return n;
+}
+
+function renderEntities() {
+  const box = $("entities");
+  box.textContent = "";
+  for (const e of state.entities) {
+    const carte = el("div", "ent" + (e.id === state.actifId ? " active" : ""));
+
+    const head = el("div", "head");
+    head.appendChild(el("b", null, `${e.name} (${e.classe})`));
+    head.appendChild(el("span", "muted", e.life > 0 ? `case ${e.cellId}` : "vaincu"));
+    head.addEventListener("click", () => {
+      state.actifId = e.id;
+      state.spellChoisi = null;
+      render();
+    });
+    carte.appendChild(head);
+
+    const body = el("div", "body2");
+    const barre = el("div", "bar");
+    const vie = el("i", "vie");
+    vie.style.width = `${Math.round(e.life / e.maxLife * 100)}%`;
+    barre.appendChild(vie);
+    barre.appendChild(el("span", null, `${e.life} / ${e.maxLife}`));
+    body.appendChild(barre);
+
+    if (e.shield > 0) {
+      const bb = el("div", "bar");
+      const b = el("i", "bouclier");
+      b.style.width = `${Math.min(100, Math.round(e.shield / e.maxLife * 100))}%`;
+      bb.appendChild(b);
+      bb.appendChild(el("span", null, `bouclier ${e.shield}`));
+      body.appendChild(bb);
+    }
+
+    const pp = el("div", "papm");
+    pp.appendChild(el("span", null, "PA ")).appendChild(el("b", null, String(e.pa)));
+    pp.appendChild(el("span", null, "PM ")).appendChild(el("b", null, String(e.pm)));
+    body.appendChild(pp);
+
+    if (e.buffs.length) {
+      const b = el("div", "buffs");
+      b.textContent = e.buffs
+        .map((x) => `${x.label} ${x.value >= 0 ? "+" : ""}${x.value} (${x.duration}t)`)
+        .join(" · ");
+      body.appendChild(b);
+    }
+    carte.appendChild(body);
+    box.appendChild(carte);
+  }
+  $("turnInfo").textContent = `${actif().name} joue`;
+}
+
+function niveauChoisi() {
+  if (!state.spellChoisi) return null;
+  return S.levelFor(state.spellChoisi, state.level);
+}
+
+function renderSpells() {
+  const box = $("spells");
+  box.textContent = "";
+  const e = actif();
+  const liste = state.data.byClass[e.classe] || [];
+  $("spellTitle").textContent = `Sorts — ${capitalise(e.classe)} (${liste.length})`;
+
+  if (!liste.length) {
+    box.appendChild(el("div", "empty-msg", "Aucun sort pour cette classe."));
+    return;
+  }
+
+  for (const spell of liste) {
+    const niveau = S.levelFor(spell, state.level);
+    if (!niveau) continue;
+    const abordable = e.pa >= (niveau.apCost || 0);
+    const carte = el("div", "spell"
+      + (state.spellChoisi && state.spellChoisi.id === spell.id ? " on" : "")
+      + (abordable ? "" : " ko"));
+
+    const t = el("div", "t");
+    t.appendChild(el("b", null, spell.name));
+    const portee = niveau.ranges && niveau.ranges[0] ? niveau.ranges[0] : { min: 0, max: 0 };
+    t.appendChild(el("span", "meta",
+      `${niveau.apCost} PA · ${portee.min}–${portee.max}${niveau.modifiableRange ? " (PO)" : ""}`));
+    carte.appendChild(t);
+
+    const ul = el("ul", "fx");
+    for (const fx of niveau.effects) {
+      const li = el("li", fx.kind ? null : "unk");
+      const bornes = fx.min === fx.max ? `${fx.min}` : `${fx.min}–${fx.max}`;
+      li.textContent = `${bornes} ${fx.label}` + (fx.kind ? "" : " ⚠ non appliqué");
+      ul.appendChild(li);
+    }
+    carte.appendChild(ul);
+
+    carte.addEventListener("click", () => {
+      state.spellChoisi = state.spellChoisi && state.spellChoisi.id === spell.id ? null : spell;
+      render();
+    });
+    box.appendChild(carte);
+  }
+}
+
+function journalise(entrees) {
+  const log = $("log");
+  for (const l of entrees) {
+    const d = el("div", l.type, l.texte);
+    log.appendChild(d);
+  }
+  log.scrollTop = log.scrollHeight;
+}
+
+function render() {
+  renderEntities();
+  renderSpells();
+  dessiner();
+  const niveau = niveauChoisi();
+  $("hint").textContent = niveau
+    ? `Cliquez une case pour lancer ${state.spellChoisi.name}`
+    : "Choisissez un sort à gauche";
+}
+
+/* ==========================================================================
+   Interactions
+   ========================================================================== */
+
+function caseSous(ev) {
+  const r = cv.getBoundingClientRect();
+  const c = G.pickCoord(ev.clientX - r.left, ev.clientY - r.top, state.hw, state.hh);
+  return state.grid.coordToId(c.x, c.y);
+}
+
+cv.addEventListener("mousemove", (ev) => {
+  const id = caseSous(ev);
+  if (id !== state.hoverCell) { state.hoverCell = id; dessiner(); }
+});
+cv.addEventListener("mouseleave", () => { state.hoverCell = -1; dessiner(); });
+
+cv.addEventListener("click", (ev) => {
+  const cible = caseSous(ev);
+  if (cible < 0) return;
+  const niveau = niveauChoisi();
+  if (!niveau) return;
+
+  const res = S.castSpell({
+    grid: state.grid, map: state.map, caster: actif(),
+    spell: state.spellChoisi, level: niveau, targetCell: cible,
+    entities: state.entities,
+  });
+
+  if (!res.ok) {
+    journalise([{ type: "refus", texte: `Lancer impossible : ${res.reasons.join(" · ")}` }]);
+  } else {
+    journalise(res.journal);
+  }
+  render();
+});
+
+$("btnTurn").addEventListener("click", () => {
+  const e = actif();
+  const expires = S.tickBuffs(e);
+  for (const b of expires) {
+    journalise([{ type: "info", texte: `${e.name} : ${b.label} expire.` }]);
+  }
+  // On passe la main, puis on rend ses points au nouveau combattant.
+  state.actifId = state.entities.find((x) => x.id !== state.actifId).id;
+  const suivant = actif();
+  suivant.pa = suivant.stats.pa || 6;
+  suivant.pm = suivant.stats.pm || 3;
+  state.spellChoisi = null;
+  journalise([{ type: "tour", texte: `— Tour de ${suivant.name} —` }]);
+  render();
+});
+
+$("btnReset").addEventListener("click", () => {
+  creerEntites();
+  nouvelleCarte("1");
+  $("log").textContent = "";
+  render();
+});
+$("btnMap").addEventListener("click", () => { nouvelleCarte(); render(); });
+$("btnClearLog").addEventListener("click", () => { $("log").textContent = ""; });
+$("level").addEventListener("change", (ev) => {
+  state.level = Math.max(1, Math.min(200, Number(ev.target.value) || 200));
+  render();
+});
+
+/* ==========================================================================
+   Amorçage
+   ========================================================================== */
+
+async function chargerSorts() {
+  // Sur http(s), on relit le JSON en contournant le cache : une extraction
+  // fraîche ne doit jamais être masquée par une version périmée.
+  if (location.protocol !== "file:") {
+    try {
+      const res = await fetch("data/spells.json", { cache: "no-store" });
+      if (res.ok) return await res.json();
+    } catch (err) { /* repli sur la balise <script> */ }
+  }
+  return window.KOLIZEUM_SPELLS || null;
+}
+
+async function boot() {
+  const payload = await chargerSorts();
+  if (!payload) {
+    document.body.innerHTML =
+      '<div style="padding:40px; font:14px/1.6 system-ui; color:#dfe4ec">'
+      + "<h2>Aucun sort chargé</h2>"
+      + "<p>Générez le jeu de données avant d'ouvrir cette page :</p>"
+      + "<pre style='background:#232833; padding:10px; border-radius:6px'>"
+      + "node scripts/fetch_spells.js</pre>"
+      + "<p class='muted'>Ou lancez le workflow « Extraire les sorts » depuis l'onglet Actions.</p></div>";
+    return;
+  }
+
+  state.data = S.indexData(payload);
+  const meta = state.data.meta || {};
+  $("provenance").textContent = [
+    meta.source || "?",
+    `${state.data.spells.length} sorts`,
+    (meta.classes || []).map((c) => c.nom).join(" · "),
+    meta.generatedAt ? `extrait le ${new Date(meta.generatedAt).toLocaleString("fr-FR")}` : null,
+  ].filter(Boolean).join(" · ");
+
+  const avert = meta.warnings || [];
+  if (avert.length) {
+    $("banner").classList.remove("hidden");
+    $("banner").innerHTML = `<b>${avert.length} avertissement(s) à l'extraction :</b> `
+      + avert.slice(0, 2).map((w) => String(w).replace(/</g, "&lt;")).join(" · ");
+  }
+
+  creerEntites();
+  nouvelleCarte("1");
+  journalise([{ type: "tour", texte: `— Tour de ${actif().name} —` }]);
+  render();
+}
+
+boot();
+</script>
+</body>
+</html>
