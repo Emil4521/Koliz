@@ -154,6 +154,23 @@ Un effet dont la nature n'est pas confirmée sort avec `kind: null`. Il est
 alors affiché dans la fiche du sort avec un ⚠ et **journalisé comme non
 appliqué** au moment du lancer — jamais deviné.
 
+### Contrainte de l'API : pas de filtres groupés
+
+`api.dofusdb.fr` **répond HTTP 500 à tout filtre `$in` portant plusieurs
+valeurs**. Cela a fait échouer l'extraction des équipements
+(`typeId[$in][0..31]`), puis celle des sorts (`id[$in][0..21]`) — la même
+erreur, commise deux fois.
+
+Les deux scripts interrogent donc l'API **une valeur à la fois** : un type
+d'objet par requête, un sort par requête. C'est plus bavard en réseau, mais
+c'est la seule forme que cette API accepte de façon fiable. Les deux fausses
+API de test rejettent désormais les filtres groupés, pour que le motif ne
+puisse pas revenir sans être détecté.
+
+La liaison classe → sorts passe par `breedSpellsId`, une liste d'identifiants
+portée par le document de classe — et non par un filtre `breedId` sur
+`/spells`, qui répond sans erreur et sans résultat.
+
 ### Limites connues
 
 - Le **déplacement forcé** (poussée, attirance) est journalisé mais pas encore

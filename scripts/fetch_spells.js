@@ -200,6 +200,38 @@ function firstArray(obj, noms) {
 }
 
 /**
+ * Récupère des documents UN IDENTIFIANT À LA FOIS.
+ *
+ * L'API refuse les filtres groupés : `?id[$in][0..21]=…` répond HTTP 500, tout
+ * comme `typeId[$in][0..31]` lors de l'extraction des équipements. La leçon
+ * avait été tirée là-bas puis oubliée ici. Une égalité simple par requête est
+ * plus bavarde en réseau, mais c'est la seule forme que cette API accepte de
+ * façon fiable.
+ *
+ * Un identifiant introuvable est signalé sans interrompre le reste.
+ */
+async function fetchParIdentifiant(resource, ids, opts, reporter) {
+  const out = [];
+  const manquants = [];
+  for (const id of ids) {
+    try {
+      const rows = await fetchCollection(resource, { id: String(id) }, opts, reporter, true);
+      if (rows.length) out.push(...rows);
+      else manquants.push(id);
+    } catch (err) {
+      manquants.push(id);
+      reporter.debug(`${resource} #${id} : ${err.message}`);
+    }
+    if (opts.delay) await sleep(opts.delay);
+  }
+  if (manquants.length) {
+    reporter.warn(`${manquants.length} ${resource} introuvables : ${manquants.slice(0, 10).join(", ")}`
+      + (manquants.length > 10 ? " …" : ""));
+  }
+  return out;
+}
+
+/**
  * Cherche, dans un document, les champs dont la valeur vaut l'un des
  * identifiants fournis. Sert à découvrir COMMENT un sort référence sa classe
  * quand le nom du champ n'est pas celui qu'on croyait.
@@ -228,16 +260,11 @@ async function sortsDeLaClasse(classe, opts, reporter, diagnostic) {
   // Piste 1 — la classe porte-t-elle la liste de ses sorts ?
   const liste = firstArray(classe.raw, ["breedSpellsId", "spells", "spellIds", "spellsId"]);
   if (liste) {
-    reporter.debug(`${classe.nom} : liste de sorts via « ${liste.nom} » (${liste.valeur.length})`);
     const ids = liste.valeur.map((v) => (v && typeof v === "object" ? v.id : v)).filter(Number.isFinite);
     if (ids.length) {
-      const query = {};
-      ids.forEach((id, i) => { query[`id[$in][${i}]`] = String(id); });
-      const rows = await fetchCollection("spells", query, opts, reporter, true);
-      if (rows.length) {
-        reporter.info(`  ${classe.nom} : ${rows.length} sorts via « ${liste.nom} »`);
-        return rows;
-      }
+      reporter.info(`  ${classe.nom} : ${ids.length} identifiants via « ${liste.nom} »`);
+      const rows = await fetchParIdentifiant("spells", ids, opts, reporter);
+      if (rows.length) return rows;
     }
   }
 

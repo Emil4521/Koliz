@@ -88,6 +88,9 @@ function extraire(mock, args) {
 
   assert.strictEqual(payload.spells.length, 3, "sorts retrouvés via la liste de la classe");
   assert.ok(/breedSpellsId/.test(rapport), "la piste retenue est annoncée");
+  // La fausse API renvoie HTTP 500 sur tout filtre groupé, comme la vraie : si
+  // le script en employait un, l'extraction échouerait au lieu d'aboutir.
+  assert.ok(!/\$in/.test(rapport), "aucun filtre groupé n'apparaît dans le rapport");
 
   const parClasse = payload.spells.reduce((acc, s) => {
     acc[s.class] = (acc[s.class] || 0) + 1;

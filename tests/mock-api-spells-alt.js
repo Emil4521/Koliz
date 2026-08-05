@@ -2,8 +2,9 @@
  * Variante de fausse API où la liaison classe → sorts N'EST PAS `breedId`.
  *
  * C'est le cas rencontré en production : `/spells?breedId=8` répond sans erreur
- * mais sans résultat. Ici, la classe porte la liste de ses sorts et `/spells`
- * ne se filtre que par identifiant — le script doit s'en sortir seul.
+ * mais sans résultat, la classe porte la liste de ses sorts dans
+ * `breedSpellsId`, et les filtres groupés `$in` font tomber l'API en HTTP 500.
+ * Seule l'égalité `?id=<n>` fonctionne — le script doit s'y plier.
  */
 
 const BREEDS = [
@@ -53,11 +54,12 @@ globalThis.fetch = async (input) => {
     const parClasse = ["breedId", "breed", "classId", "characterClassId", "typeId"]
       .some((c) => url.searchParams.has(c));
     if (parClasse) rows = [];
-    else {
-      const ids = [...url.searchParams.entries()]
-        .filter(([k]) => k.startsWith("id[$in]"))
-        .map(([, v]) => Number(v));
-      rows = ids.length ? SPELLS.filter((s) => ids.includes(s.id)) : SPELLS;
+    else if ([...url.searchParams.keys()].some((k) => k.includes("[$in]"))) {
+      // Comme la vraie API : un filtre groupé fait tomber la requête.
+      return { ok: false, status: 500, json: async () => ({ message: "filtre groupé refusé" }) };
+    } else {
+      const id = url.searchParams.get("id");
+      rows = id === null ? SPELLS : SPELLS.filter((s) => s.id === Number(id));
     }
   } else return { ok: false, status: 404, json: async () => ({}) };
 
