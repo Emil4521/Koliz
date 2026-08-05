@@ -223,6 +223,144 @@ const LEVEL = { level: 200 };
   assert.notStrictEqual(build("A"), build("B"), "graines différentes → builds différents");
 }
 
+/* --- Points de caractéristiques -------------------------------------------- */
+{
+  // 5 points par niveau, du niveau 2 au niveau 200.
+  assert.strictEqual(I.pointsAvailable(1), 0, "aucun point au niveau 1");
+  assert.strictEqual(I.pointsAvailable(2), 5, "5 points au niveau 2");
+  assert.strictEqual(I.pointsAvailable(200), 995, "995 points au niveau 200");
+  assert.strictEqual(I.pointsAvailable(200), 199 * I.POINTS_PER_LEVEL, "199 montées de niveau");
+
+  // Paliers de coût sur une caractéristique élémentaire.
+  assert.strictEqual(I.costOfNextPoint("force", 0), 1, "1 point jusqu'à 100");
+  assert.strictEqual(I.costOfNextPoint("force", 99), 1, "encore 1 à 99");
+  assert.strictEqual(I.costOfNextPoint("force", 100), 2, "2 points au-delà de 100");
+  assert.strictEqual(I.costOfNextPoint("force", 200), 3, "3 points au-delà de 200");
+  assert.strictEqual(I.costOfNextPoint("force", 300), 4, "4 points au-delà de 300");
+  assert.strictEqual(I.costOfNextPoint("force", 400), 5, "5 points au-delà de 400");
+
+  // Vitalité et sagesse ont un coût constant.
+  assert.strictEqual(I.costOfNextPoint("vitalite", 500), 1, "vitalité toujours à 1");
+  assert.strictEqual(I.costOfNextPoint("sagesse", 500), 3, "sagesse toujours à 3");
+
+  // Le coût cumulé suit les tranches, sans compter point par point.
+  assert.strictEqual(I.costToBuy("force", 0, 100), 100, "100 premiers points");
+  assert.strictEqual(I.costToBuy("force", 0, 200), 300, "100 + 200");
+  assert.strictEqual(I.costToBuy("force", 100, 200), 200, "tranche 101-200 seule");
+
+  // Le budget n'est jamais dépassé, et l'attribution est partielle plutôt que
+  // refusée en bloc : un « +10 » reste utile s'il ne reste que 6 points.
+  const d = I.createDistribution();
+  const mis = I.spendPoints(d, "vitalite", 5000, 200);
+  assert.strictEqual(mis, 995, "995 points de vitalité attribuables");
+  assert.strictEqual(I.pointsSpent(d), 995, "budget entièrement consommé");
+  assert.strictEqual(I.spendPoints(d, "force", 10, 200), 0, "plus rien à dépenser");
+
+  const partiel = I.createDistribution();
+  I.spendPoints(partiel, "vitalite", 992, 200);
+  assert.strictEqual(I.spendPoints(partiel, "sagesse", 10, 200), 1,
+    "un seul point de sagesse tient dans les 3 restants");
+
+  // Les maximums atteignables correspondent aux valeurs connues du jeu.
+  for (const [stat, attendu] of [["vitalite", 995], ["sagesse", 331], ["force", 398]]) {
+    const seul = I.createDistribution();
+    I.spendPoints(seul, stat, 9999, 200);
+    assert.strictEqual(seul[stat], attendu, `maximum en ${stat}`);
+    assert.ok(I.pointsSpent(seul) <= 995, `budget respecté en ${stat}`);
+  }
+
+  // Remboursement.
+  const r = I.createDistribution();
+  I.spendPoints(r, "force", 150, 200);
+  assert.strictEqual(I.refundPoints(r, "force", 50), 50, "50 points rendus");
+  assert.strictEqual(r.force, 100, "force ramenée à 100");
+  assert.strictEqual(I.refundPoints(r, "force", 9999), 100, "on ne descend pas sous zéro");
+}
+
+/* --- Les points alimentent les statistiques -------------------------------- */
+{
+  const lo = I.createLoadout();
+  I.spendPoints(lo.distribution, "vitalite", 300, 200);
+  I.spendPoints(lo.distribution, "force", 100, 200);
+
+  const s = I.computeStats(lo, data, LEVEL);
+  assert.strictEqual(s.fromPoints.vitalite, 300, "vitalité issue des points");
+  assert.strictEqual(s.fromPoints.force, 100, "force issue des points");
+  assert.strictEqual(s.total.vitalite, 300, "total incluant les points");
+
+  const vieBase = I.BASE_CHARACTER.vieBase + 199 * I.BASE_CHARACTER.viePerLevel;
+  assert.strictEqual(s.life.total, vieBase + 300, "la vie suit la vitalité des points");
+  assert.strictEqual(s.points.spent, 300 + 100, "points dépensés");
+  assert.strictEqual(s.points.remaining, 995 - 400, "points restants");
+}
+
+/* --- Forgemagie ------------------------------------------------------------ */
+{
+  const lo = I.createLoadout();
+  const res = I.equip(lo, item(1), { quality: 0 });    // vitalité 20, force 5
+  const entry = res.entry;
+
+  // Modifier une ligne native, au-delà des bornes officielles.
+  I.setEffectValue(entry, 125, 999);
+  let lignes = I.effectiveEffects(item(1), entry);
+  const vita = lignes.find((l) => l.effectId === 125);
+  assert.strictEqual(vita.value, 999, "valeur forgée appliquée");
+  assert.ok(vita.overmax, "dépassement des bornes signalé");
+  assert.ok(!vita.exotic, "la ligne reste native");
+
+  let s = I.computeStats(lo, data, LEVEL);
+  assert.strictEqual(s.fromItems.vitalite, 999, "la valeur forgée est cumulée");
+
+  // Ajouter une ligne exotique.
+  assert.ok(I.addExoticEffect(entry, item(1), 128, 3), "ligne exotique ajoutée");
+  s = I.computeStats(lo, data, LEVEL);
+  assert.strictEqual(s.fromItems.pm, 3, "la ligne exotique est cumulée");
+  assert.strictEqual(s.total.pm, I.BASE_CHARACTER.pm + 3, "PM total");
+
+  lignes = I.effectiveEffects(item(1), entry);
+  const exo = lignes.find((l) => l.effectId === 128);
+  assert.ok(exo.exotic, "ligne marquée exotique");
+  assert.strictEqual(exo.min, null, "une ligne exotique n'a pas de bornes officielles");
+
+  // Un effet déjà natif ne peut pas être ajouté en exotique.
+  assert.ok(!I.addExoticEffect(entry, item(1), 125, 50), "pas de doublon avec une ligne native");
+
+  // La relance ne touche que les lignes natives.
+  I.rerollEntry(entry, item(1), I.makeRng("relance"), 1);
+  assert.strictEqual(entry.roll[125], 40, "ligne native relancée au maximum");
+  assert.strictEqual(entry.roll[128], 3, "ligne exotique préservée par la relance");
+  assert.deepStrictEqual(entry.exotic, [128], "la liste exotique survit");
+
+  // Retrait d'une ligne exotique.
+  assert.ok(I.removeExoticEffect(entry, 128), "ligne exotique retirée");
+  assert.strictEqual(entry.roll[128], undefined, "valeur supprimée");
+  s = I.computeStats(lo, data, LEVEL);
+  assert.strictEqual(s.fromItems.pm, 0, "plus cumulée après retrait");
+  assert.ok(!I.removeExoticEffect(entry, 125), "une ligne native n'est pas supprimable");
+}
+
+/* --- Export / import : répartition et forge ------------------------------- */
+{
+  const lo = I.createLoadout();
+  I.spendPoints(lo.distribution, "chance", 120, 200);
+  const res = I.equip(lo, item(1), { quality: 1 });
+  I.setEffectValue(res.entry, 125, 777);
+  I.addExoticEffect(res.entry, item(1), 111, 1);
+
+  const avant = JSON.stringify(I.computeStats(lo, data, LEVEL).total);
+  const round = I.importLoadout(JSON.parse(JSON.stringify(I.exportLoadout(lo, LEVEL))));
+  const apres = JSON.stringify(I.computeStats(round, data, LEVEL).total);
+
+  assert.strictEqual(apres, avant, "aller-retour conservant points et forge");
+  assert.strictEqual(round.distribution.chance, 120, "répartition restaurée");
+  assert.deepStrictEqual(round.slots.coiffe[0].exotic, [111], "ligne exotique restaurée");
+
+  // Un build antérieur, sans répartition, ne doit pas inventer de points.
+  const ancien = I.importLoadout({ v: 1, slots: { coiffe: [{ itemId: 1, roll: {} }] } });
+  assert.strictEqual(I.pointsSpent(ancien.distribution), 0, "aucun point inventé");
+  assert.deepStrictEqual(ancien.slots.coiffe[0].exotic, [], "pas de ligne exotique");
+}
+
 /* --- Invariant entre les deux modules --------------------------------------
    `scripts/fetch_items.js` produit les `statKey`, `client/items.js` les agrège.
    Une clé connue du premier mais pas du second ne provoque aucune erreur : elle

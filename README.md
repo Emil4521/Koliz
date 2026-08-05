@@ -109,9 +109,18 @@ de [nodejs.org](https://nodejs.org).
 - Capacité respectée par emplacement (2 anneaux, 6 Dofus/trophées, etc.) et
   refus des doublons sur un même emplacement.
 - **Panoplies** détectées automatiquement, avec palier atteint et bonus appliqué.
-- Récapitulatif des statistiques : base, apport des objets, apport des
+- **Points de caractéristiques** : 5 par niveau du 2 au 200, soit 995 au niveau
+  200, à répartir entre vitalité, sagesse, force, intelligence, chance et
+  agilité. Le coût du prochain point est affiché, les paliers sont appliqués et
+  le budget ne peut pas être dépassé.
+- **Forgemagie** : modifier la valeur de n'importe quelle ligne d'un objet
+  équipé, ou lui ajouter une ligne exotique. Le dépassement des bornes
+  officielles est signalé, jamais interdit — c'est un outil de théorycraft, pas
+  une simulation d'atelier. La forge appartient à l'exemplaire porté, pas à la
+  définition de l'objet.
+- Récapitulatif des statistiques : base, points, apport des objets, apport des
   panoplies, total — et points de vie dérivés de la vitalité.
-- Export / import d'un build en JSON.
+- Export / import d'un build en JSON, répartition et forge comprises.
 
 ### Le point délicat : les identifiants d'effets
 
@@ -141,8 +150,17 @@ niveau viennent de l'équipement. La fidélité mécanique étant l'objectif pre
 
 Sont également marquées « à confirmer » dans le code, faute de source
 vérifiable hors ligne : les points de vie de base (55 au niveau 1, +5 par
-niveau) et le caractère **non cumulatif** des paliers de panoplie (4 pièces ⇒
-bonus « 4 pièces » seul, et non la somme des paliers).
+niveau), le caractère **non cumulatif** des paliers de panoplie (4 pièces ⇒
+bonus « 4 pièces » seul, et non la somme des paliers), et le **barème des
+points de caractéristiques**.
+
+Ce barème reprend la table classique de Dofus — 1 point jusqu'à 100, puis 2, 3,
+4 et 5 par tranche de 100 pour les caractéristiques élémentaires ; 1 pour la
+vitalité et 3 pour la sagesse, sans palier. Il donne 995 en vitalité, 331 en
+sagesse et 398 en élémentaire au niveau 200, ce qui concorde avec les valeurs
+connues, mais n'a pas pu être recoupé contre une source de référence
+(`dofus-stuffer.is-great.net` est inaccessible depuis l'environnement de
+développement). Tout se corrige dans la constante `STAT_POINT_COSTS`.
 
 ### Limites connues
 

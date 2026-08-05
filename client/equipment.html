@@ -94,6 +94,37 @@
   .fx .bar { width: 34px; height: 4px; background: #2b313d; border-radius: 2px; overflow: hidden; }
   .fx .bar i { display: block; height: 100%; background: var(--accent); }
   .fx .unk { color: var(--warn); }
+  .fx .tag {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+    border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; color: var(--muted);
+  }
+  .fx .tag.exo { border-color: #6b4fa8; color: #b39ddb; }
+  .fx .tag.over { border-color: #8a6d1f; color: var(--warn); }
+
+  /* ---------- Points de caractéristiques ---------- */
+  #points { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); margin-bottom: 10px; }
+  #points .head {
+    display: flex; align-items: center; gap: 8px; padding: 6px 9px;
+    background: var(--panel-2); font-size: 11px; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--muted);
+  }
+  #points .head .left { flex: 1 1 auto; }
+  #points .head .rem { font: 12px ui-monospace, monospace; color: var(--ok); text-transform: none; }
+  #points .head .rem.none { color: var(--muted); }
+  #points .body { padding: 6px 9px; }
+  .prow { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .prow .name { flex: 1 1 auto; color: var(--muted); }
+  .prow .val { font: 12px ui-monospace, monospace; min-width: 34px; text-align: right; }
+  .prow .cost { font: 10px ui-monospace, monospace; color: #5c6577; min-width: 40px; text-align: right; }
+  .prow button { padding: 0 5px; font: 11px ui-monospace, monospace; }
+  .prow button:disabled { opacity: .35; cursor: default; border-color: var(--line); }
+
+  /* ---------- Forgemagie ---------- */
+  .fm-row { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+  .fm-row .lbl { flex: 1 1 auto; }
+  .fm-row .rng { color: #5c6577; font: 11px ui-monospace, monospace; min-width: 64px; text-align: right; }
+  .fm-row input[type=number] { width: 76px; }
+  .fm-sep { border-top: 1px solid var(--line); margin: 10px 0 8px; padding-top: 8px; color: var(--muted); font-size: 11px; }
 
   /* ---------- Catalogue ---------- */
   #catalogTools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -194,7 +225,10 @@
 <div id="cols">
   <div class="col" id="colSlots">
     <h2><span>Personnage</span><span id="slotSummary" class="muted"></span></h2>
-    <div class="body" id="slotsBody"></div>
+    <div class="body">
+      <div id="points"></div>
+      <div id="slotsBody"></div>
+    </div>
   </div>
 
   <div class="col" id="colCatalog">
@@ -258,14 +292,22 @@ function el(tag, className, text) {
 
 function signed(n) { return n > 0 ? `+${n}` : String(n); }
 
-/** Liste d'effets d'un objet équipé : valeur obtenue, bornes, position du jet. */
-function effectList(item, roll) {
+/**
+ * Liste d'effets. Avec un exemplaire équipé (`entry`), on affiche les valeurs
+ * réellement portées — lignes forgées et exotiques comprises ; sans lui, on
+ * n'affiche que les fourchettes officielles du catalogue.
+ */
+function effectList(item, entry) {
   const ul = el("ul", "fx");
-  for (const effect of item.effects) {
-    const info = Items.describeEffect(effect, state.data, roll ? roll[effect.effectId] : undefined);
+  const lignes = entry
+    ? Items.effectiveEffects(item, entry)
+    : item.effects.map((e) => ({ ...e, value: undefined, exotic: false, overmax: false }));
+
+  for (const ligne of lignes) {
+    const info = Items.describeEffect(ligne, state.data, ligne.value);
     const li = el("li");
 
-    const val = el("span", "val", info.value != null ? signed(info.value) : `${effect.min}~${effect.max}`);
+    const val = el("span", "val", info.value != null ? signed(info.value) : `${ligne.min}~${ligne.max}`);
     if (info.value != null && info.value < 0) val.classList.add("neg");
     li.appendChild(val);
 
@@ -278,21 +320,94 @@ function effectList(item, roll) {
     }
     li.appendChild(lbl);
 
-    if (effect.min !== effect.max) {
-      li.appendChild(el("span", "rng", `${effect.min}–${effect.max}`));
+    if (ligne.exotic) {
+      const tag = el("span", "tag exo", "exo");
+      tag.title = "Ligne ajoutée à la forge : l'objet ne la porte pas nativement.";
+      li.appendChild(tag);
+    } else if (ligne.overmax) {
+      const tag = el("span", "tag over", "forgé");
+      tag.title = `Valeur hors des bornes officielles (${ligne.min}–${ligne.max}).`;
+      li.appendChild(tag);
+    } else if (ligne.min !== ligne.max) {
+      li.appendChild(el("span", "rng", `${ligne.min}–${ligne.max}`));
       if (info.value != null) {
         const bar = el("span", "bar");
         const fill = el("i");
-        const ratio = (info.value - effect.min) / (effect.max - effect.min);
+        const ratio = (info.value - ligne.min) / (ligne.max - ligne.min);
         fill.style.width = `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`;
         bar.appendChild(fill);
-        bar.title = `Jet : ${info.value} sur ${effect.min}–${effect.max}`;
+        bar.title = `Jet : ${info.value} sur ${ligne.min}–${ligne.max}`;
         li.appendChild(bar);
       }
     }
     ul.appendChild(li);
   }
   return ul;
+}
+
+/* ==========================================================================
+   Points de caractéristiques
+   ========================================================================== */
+
+function renderPoints() {
+  const box = $("points");
+  box.textContent = "";
+  const dist = state.loadout.distribution;
+  const dispo = Items.pointsAvailable(state.level);
+  const depenses = Items.pointsSpent(dist);
+  const restants = dispo - depenses;
+
+  const head = el("div", "head");
+  head.appendChild(el("span", "left", "Points de caractéristiques"));
+  const rem = el("span", "rem" + (restants === 0 ? " none" : ""), `${restants} / ${dispo}`);
+  rem.title = `${depenses} points dépensés au niveau ${state.level}`;
+  head.appendChild(rem);
+  box.appendChild(head);
+
+  const body = el("div", "body");
+  for (const stat of Items.POINT_STATS) {
+    const valeur = dist[stat] || 0;
+    const prix = Items.costOfNextPoint(stat, valeur);
+    const row = el("div", "prow");
+    row.appendChild(el("span", "name", statLabel(stat)));
+    row.appendChild(el("span", "val", String(valeur)));
+
+    const cout = el("span", "cost", `${prix} pt${prix > 1 ? "s" : ""}`);
+    cout.title = "Coût du prochain point";
+    row.appendChild(cout);
+
+    for (const [texte, delta] of [["−10", -10], ["−1", -1], ["+1", 1], ["+10", 10]]) {
+      const b = el("button", null, texte);
+      const possible = delta < 0
+        ? valeur > 0
+        : Items.costOfNextPoint(stat, valeur) <= restants;
+      b.disabled = !possible;
+      b.addEventListener("click", () => {
+        if (delta < 0) Items.refundPoints(dist, stat, -delta);
+        else Items.spendPoints(dist, stat, delta, state.level);
+        render();
+      });
+      row.appendChild(b);
+    }
+    body.appendChild(row);
+  }
+
+  const reset = el("button", null, "Réinitialiser la répartition");
+  reset.style.marginTop = "4px";
+  reset.addEventListener("click", () => {
+    state.loadout.distribution = Items.createDistribution();
+    render();
+  });
+  body.appendChild(reset);
+  box.appendChild(body);
+}
+
+/** Libellé d'affichage d'une statistique agrégée. */
+function statLabel(key) {
+  for (const groupe of Items.STAT_GROUPS) {
+    for (const [k, label] of groupe.stats) if (k === key) return label;
+  }
+  return key;
 }
 
 function weaponLine(item) {
@@ -344,11 +459,18 @@ function renderSlots() {
       title.appendChild(el("span", "eq-lvl", `niv. ${item.level}`));
 
       const actions = el("div", "eq-actions");
+      const forge = el("button", null, "⚒");
+      forge.title = "Forgemagie : modifier les valeurs, ajouter une ligne exotique";
+      forge.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        openForge(item, entry);
+      });
+
       const reroll = el("button", null, "↻");
-      reroll.title = "Relancer les jets de cet objet";
+      reroll.title = "Relancer les jets natifs (les lignes exotiques sont conservées)";
       reroll.addEventListener("click", (ev) => {
         ev.stopPropagation();
-        entry.roll = Items.rollItem(item, state.rng, qualityValue());
+        Items.rerollEntry(entry, item, state.rng, qualityValue());
         render();
       });
       const remove = el("button", "danger", "✕");
@@ -358,13 +480,13 @@ function renderSlots() {
         Items.unequip(state.loadout, slot, index);
         render();
       });
-      actions.append(reroll, remove);
+      actions.append(forge, reroll, remove);
       title.appendChild(actions);
       row.appendChild(title);
 
       const w = weaponLine(item);
       if (w) row.appendChild(w);
-      row.appendChild(effectList(item, entry.roll));
+      row.appendChild(effectList(item, entry));
       box.appendChild(row);
     });
 
@@ -446,7 +568,7 @@ function renderCatalog() {
 function renderStats() {
   const body = $("statsBody");
   body.textContent = "";
-  const s = Items.computeStats(state.loadout, state.data, { level: state.level });
+  const s = Items.computeStats(state.loadout, state.data, { level: state.level, distribution: state.loadout.distribution });
 
   // Vie
   const life = el("div", "life");
@@ -532,6 +654,7 @@ function renderStats() {
 }
 
 function render() {
+  renderPoints();
   renderSlots();
   renderCatalog();
   renderStats();
@@ -573,7 +696,7 @@ $("btnRerollAll").addEventListener("click", () => {
   for (const slot of Items.SLOT_ORDER) {
     for (const entry of state.loadout.slots[slot]) {
       const item = state.data.itemById.get(entry.itemId);
-      if (item) entry.roll = Items.rollItem(item, state.rng, qualityValue());
+      if (item) Items.rerollEntry(entry, item, state.rng, qualityValue());
     }
   }
   render();
@@ -598,6 +721,143 @@ $("btnImport").addEventListener("click", () => {
     }
   });
 });
+
+/* ==========================================================================
+   Forgemagie
+   ========================================================================== */
+
+/** Effets proposables en ligne exotique : ceux qui alimentent une statistique. */
+function forgeableEffects() {
+  const parLibelle = new Map();
+  for (const def of Object.values(state.data.effects)) {
+    if (!def.statKey || !def.label) continue;
+    // Plusieurs identifiants partagent le même libellé : on garde le plus petit,
+    // le choix étant sans conséquence puisque l'agrégation passe par statKey.
+    const existant = parLibelle.get(def.label);
+    if (!existant || def.id < existant.id) parLibelle.set(def.label, def);
+  }
+  return [...parLibelle.values()].sort((a, b) => a.label.localeCompare(b.label, "fr"));
+}
+
+/**
+ * Éditeur de forgemagie d'un exemplaire équipé. Les valeurs ne sont pas
+ * bornées : dépasser la fourchette officielle est signalé, jamais empêché.
+ */
+function openForge(item, entry) {
+  const { dialog, panel } = makeDialog(`Forgemagie — ${item.name}`);
+
+  const redessine = () => {
+    corps.textContent = "";
+
+    for (const ligne of Items.effectiveEffects(item, entry)) {
+      const def = state.data.effects[ligne.effectId];
+      const row = el("div", "fm-row");
+
+      const lbl = el("span", "lbl", (def && def.label) || `effet ${ligne.effectId}`);
+      if (ligne.exotic) lbl.appendChild(el("span", "tag exo", " exo"));
+      row.appendChild(lbl);
+
+      row.appendChild(el("span", "rng",
+        ligne.exotic ? "libre" : `${ligne.min}–${ligne.max}`));
+
+      const input = el("input");
+      input.type = "number";
+      input.value = ligne.value != null ? ligne.value : 0;
+      input.addEventListener("change", () => {
+        Items.setEffectValue(entry, ligne.effectId, input.value);
+        redessine();
+        render();
+      });
+      row.appendChild(input);
+
+      if (ligne.exotic) {
+        const del = el("button", "danger", "✕");
+        del.title = "Retirer cette ligne";
+        del.addEventListener("click", () => {
+          Items.removeExoticEffect(entry, ligne.effectId);
+          redessine();
+          render();
+        });
+        row.appendChild(del);
+      } else if (ligne.overmax) {
+        const t = el("span", "tag over", "forgé");
+        t.title = `Hors des bornes officielles (${ligne.min}–${ligne.max}).`;
+        row.appendChild(t);
+      }
+      corps.appendChild(row);
+    }
+
+    // --- Ajout d'une ligne exotique ---
+    corps.appendChild(el("div", "fm-sep", "Ajouter une ligne exotique"));
+
+    const natifs = new Set((item.effects || []).map((e) => e.effectId));
+    const deja = new Set(entry.exotic || []);
+    const dispo = forgeableEffects().filter((d) => !natifs.has(d.id) && !deja.has(d.id));
+
+    if (!dispo.length) {
+      corps.appendChild(el("div", "muted", "Aucune caractéristique supplémentaire disponible."));
+      return;
+    }
+
+    const ajout = el("div", "fm-row");
+    const select = el("select");
+    select.style.flex = "1 1 auto";
+    for (const d of dispo) select.appendChild(new Option(d.label, String(d.id)));
+    ajout.appendChild(select);
+
+    const valeur = el("input");
+    valeur.type = "number";
+    valeur.value = "1";
+    ajout.appendChild(valeur);
+
+    const btn = el("button", "primary", "Ajouter");
+    btn.addEventListener("click", () => {
+      Items.addExoticEffect(entry, item, Number(select.value), valeur.value);
+      redessine();
+      render();
+    });
+    ajout.appendChild(btn);
+    corps.appendChild(ajout);
+  };
+
+  const corps = el("div");
+  panel.appendChild(corps);
+  redessine();
+
+  const pied = el("div");
+  pied.style.cssText = "display:flex; gap:8px; justify-content:flex-end; margin-top:10px";
+  const fermer = el("button", null, "Fermer");
+  fermer.addEventListener("click", () => dialog.remove());
+  pied.appendChild(fermer);
+  panel.appendChild(pied);
+}
+
+/** Cadre de dialogue commun. */
+function makeDialog(titre) {
+  const existant = document.getElementById("ioDialog");
+  if (existant) existant.remove();
+
+  const dialog = el("div");
+  dialog.id = "ioDialog";
+  Object.assign(dialog.style, {
+    position: "fixed", inset: "0", background: "#000a", display: "flex",
+    alignItems: "center", justifyContent: "center", zIndex: "10",
+  });
+
+  const panel = el("div");
+  Object.assign(panel.style, {
+    background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "8px",
+    padding: "14px", width: "min(560px, 92vw)", maxHeight: "86vh", overflowY: "auto",
+  });
+  const h = el("div", null, titre);
+  h.style.cssText = "font-weight:600; margin-bottom:10px";
+  panel.appendChild(h);
+
+  dialog.appendChild(panel);
+  dialog.addEventListener("click", (ev) => { if (ev.target === dialog) dialog.remove(); });
+  document.body.appendChild(dialog);
+  return { dialog, panel };
+}
 
 /** Petite boîte de dialogue d'import/export, sans dépendance. */
 function showIo(value, hint) {

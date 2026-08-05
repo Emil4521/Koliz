@@ -121,6 +121,116 @@
   const ALL_STATS = STAT_GROUPS.flatMap((g) => g.stats.map(([key]) => key));
 
   /* ========================================================================
+     Points de caractéristiques
+     ------------------------------------------------------------------------
+     Un personnage gagne 5 points par niveau, du niveau 2 au niveau 200 —
+     soit 199 × 5 = 995 points au niveau 200.
+
+     Le coût d'un point monte par paliers, et le palier se calcule sur la
+     valeur DÉJÀ ACHETÉE avec des points, sans compter l'équipement : un objet
+     ne rend jamais les points suivants plus chers.
+
+     ATTENTION — table à confirmer. Elle reprend le barème classique de Dofus,
+     mais n'a pas pu être recoupée contre une source de référence depuis
+     l'environnement de développement (egress bloqué). C'est le seul endroit à
+     corriger si le barème diffère.
+     ======================================================================== */
+
+  const POINTS_PER_LEVEL = 5;
+  const FIRST_LEVEL_WITH_POINTS = 2;
+
+  /** Caractéristiques auxquelles des points peuvent être attribués. */
+  const POINT_STATS = ["vitalite", "sagesse", "force", "intelligence", "chance", "agilite"];
+
+  /**
+   * Paliers de coût. Chaque entrée vaut « jusqu'à `upTo` inclus, un point de
+   * caractéristique coûte `cost` points ». Le dernier palier est ouvert.
+   */
+  const STAT_POINT_COSTS = {
+    vitalite: [{ upTo: Infinity, cost: 1 }],
+    sagesse: [{ upTo: Infinity, cost: 3 }],
+    force: [
+      { upTo: 100, cost: 1 }, { upTo: 200, cost: 2 }, { upTo: 300, cost: 3 },
+      { upTo: 400, cost: 4 }, { upTo: Infinity, cost: 5 },
+    ],
+  };
+  // Les quatre caractéristiques élémentaires partagent le même barème.
+  STAT_POINT_COSTS.intelligence = STAT_POINT_COSTS.force;
+  STAT_POINT_COSTS.chance = STAT_POINT_COSTS.force;
+  STAT_POINT_COSTS.agilite = STAT_POINT_COSTS.force;
+
+  /** Points disponibles à un niveau donné. */
+  function pointsAvailable(level) {
+    const lvl = Math.max(1, Math.min(200, Number(level) || 1));
+    return Math.max(0, lvl - FIRST_LEVEL_WITH_POINTS + 1) * POINTS_PER_LEVEL;
+  }
+
+  /** Répartition vierge. */
+  function createDistribution() {
+    const d = {};
+    for (const stat of POINT_STATS) d[stat] = 0;
+    return d;
+  }
+
+  /**
+   * Coût total pour porter une caractéristique de `from` à `to`.
+   * Les paliers sont parcourus par tranches plutôt que point par point.
+   */
+  function costToBuy(stat, from, to) {
+    const tiers = STAT_POINT_COSTS[stat];
+    if (!tiers || to <= from) return 0;
+    let total = 0, lower = 0;
+    for (const tier of tiers) {
+      const start = Math.max(from, lower);
+      const end = Math.min(to, tier.upTo);
+      if (end > start) total += (end - start) * tier.cost;
+      lower = tier.upTo;
+      if (lower >= to) break;
+    }
+    return total;
+  }
+
+  /** Coût du prochain point dans une caractéristique. */
+  function costOfNextPoint(stat, current) {
+    return costToBuy(stat, current, current + 1);
+  }
+
+  /** Points dépensés par une répartition. */
+  function pointsSpent(distribution) {
+    let total = 0;
+    for (const stat of POINT_STATS) total += costToBuy(stat, 0, distribution[stat] || 0);
+    return total;
+  }
+
+  /**
+   * Attribue `count` points à une caractéristique, dans la limite du budget.
+   * Retourne le nombre réellement attribué : on s'arrête au budget plutôt que
+   * de refuser en bloc, ce qui rend le « +10 » utile même s'il ne reste que 6.
+   */
+  function spendPoints(distribution, stat, count, level) {
+    if (!POINT_STATS.includes(stat)) return 0;
+
+    let restant = pointsAvailable(level) - pointsSpent(distribution);
+    let attribues = 0;
+    for (let i = 0; i < count; i++) {
+      const prix = costOfNextPoint(stat, distribution[stat] || 0);
+      if (prix > restant) break;
+      distribution[stat] = (distribution[stat] || 0) + 1;
+      restant -= prix;
+      attribues++;
+    }
+    return attribues;
+  }
+
+  /** Retire `count` points d'une caractéristique. */
+  function refundPoints(distribution, stat, count) {
+    if (!POINT_STATS.includes(stat)) return 0;
+    const avant = distribution[stat] || 0;
+    distribution[stat] = Math.max(0, avant - count);
+    return avant - distribution[stat];
+  }
+
+  /* ========================================================================
      Aléatoire déterministe
      ======================================================================== */
 
@@ -230,7 +340,7 @@
   function createLoadout() {
     const slots = {};
     for (const slot of SLOT_ORDER) slots[slot] = [];
-    return { slots };
+    return { slots, distribution: createDistribution() };
   }
 
   function equippedEntries(loadout) {
@@ -268,9 +378,86 @@
     const entry = {
       itemId: item.id,
       roll: opts.roll || rollItem(item, opts.rng, opts.quality),
+      // Lignes ajoutées à la forge : des effets que l'objet ne porte pas
+      // nativement. Leur valeur vit dans `roll`, comme les autres.
+      exotic: opts.exotic ? [...opts.exotic] : [],
     };
     list[index] = entry;
     return { ok: true, entry, index };
+  }
+
+  /* ========================================================================
+     Forgemagie
+     ------------------------------------------------------------------------
+     On modifie un objet DÉJÀ ÉQUIPÉ, sans toucher au catalogue : la
+     modification appartient à l'exemplaire porté, pas à la définition de
+     l'objet. C'est aussi ce qui permet d'équiper deux fois le même objet de
+     base avec des forges différentes.
+
+     Aucune limite n'est imposée aux valeurs : ni le poids en runes, ni les
+     plafonds de surforge ne sont simulés. Un dépassement des bornes officielles
+     est signalé à l'affichage, jamais interdit — c'est un outil de
+     théorycraft, pas une simulation d'atelier.
+     ======================================================================== */
+
+  /** Fixe la valeur d'une ligne, native ou exotique. */
+  function setEffectValue(entry, effectId, value) {
+    const v = Math.round(Number(value));
+    if (!Number.isFinite(v)) return false;
+    entry.roll[effectId] = v;
+    return true;
+  }
+
+  /** Ajoute une ligne que l'objet ne porte pas nativement. */
+  function addExoticEffect(entry, item, effectId, value) {
+    const id = Number(effectId);
+    if ((item.effects || []).some((e) => e.effectId === id)) return false;   // déjà natif
+    entry.exotic = entry.exotic || [];
+    if (!entry.exotic.includes(id)) entry.exotic.push(id);
+    return setEffectValue(entry, id, value);
+  }
+
+  /** Retire une ligne exotique. Les lignes natives ne sont pas supprimables. */
+  function removeExoticEffect(entry, effectId) {
+    const id = Number(effectId);
+    if (!entry.exotic || !entry.exotic.includes(id)) return false;
+    entry.exotic = entry.exotic.filter((x) => x !== id);
+    delete entry.roll[id];
+    return true;
+  }
+
+  /**
+   * Lignes effectivement portées par un exemplaire : les effets natifs suivis
+   * des lignes exotiques. Chacune indique sa valeur, ses bornes officielles
+   * lorsqu'elles existent, et si la valeur les dépasse.
+   */
+  function effectiveEffects(item, entry) {
+    const out = [];
+    for (const e of item.effects || []) {
+      const value = entry.roll[e.effectId];
+      out.push({
+        effectId: e.effectId, min: e.min, max: e.max, value,
+        exotic: false,
+        overmax: value != null && (value > e.max || value < e.min),
+      });
+    }
+    for (const id of entry.exotic || []) {
+      out.push({
+        effectId: id, min: null, max: null, value: entry.roll[id],
+        exotic: true, overmax: false,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Relance les jets des lignes NATIVES uniquement : une ligne exotique a été
+   * ajoutée à la main, la relancer reviendrait à la supprimer sans le dire.
+   */
+  function rerollEntry(entry, item, rng, quality) {
+    const frais = rollItem(item, rng, quality);
+    for (const [effectId, value] of Object.entries(frais)) entry.roll[effectId] = value;
+    return entry;
   }
 
   function unequip(loadout, slot, index) {
@@ -340,11 +527,17 @@
   function computeStats(loadout, data, character) {
     const char = character || {};
     const level = char.level != null ? char.level : 200;
+    const distribution = char.distribution || (loadout && loadout.distribution) || createDistribution();
 
     const base = emptyStats();
     base.pa = BASE_CHARACTER.pa;
     base.pm = BASE_CHARACTER.pm;
     base.critPct = BASE_CHARACTER.critPct;
+
+    // Points de caractéristiques : ils alimentent directement les statistiques
+    // primaires, sans passer par la table d'effets.
+    const fromPoints = emptyStats();
+    for (const stat of POINT_STATS) fromPoints[stat] = distribution[stat] || 0;
 
     const fromItems = emptyStats();
     const fromSets = emptyStats();
@@ -379,12 +572,21 @@
     }
 
     const total = emptyStats();
-    for (const key of ALL_STATS) total[key] = base[key] + fromItems[key] + fromSets[key];
+    for (const key of ALL_STATS) {
+      total[key] = base[key] + fromPoints[key] + fromItems[key] + fromSets[key];
+    }
 
     const vieBase = BASE_CHARACTER.vieBase + (level - 1) * BASE_CHARACTER.viePerLevel;
     const life = { base: vieBase, fromVitality: total.vitalite, total: vieBase + total.vitalite };
 
-    return { level, base, fromItems, fromSets, total, life, sets, unaggregated };
+    const points = {
+      available: pointsAvailable(level),
+      spent: pointsSpent(distribution),
+      distribution,
+    };
+    points.remaining = points.available - points.spent;
+
+    return { level, base, fromPoints, fromItems, fromSets, total, life, sets, points, unaggregated };
   }
 
   /* ========================================================================
@@ -434,22 +636,41 @@
   /** Sérialise une panoplie d'équipement (sauvegarde / partage de build). */
   function exportLoadout(loadout, character) {
     return {
-      v: 1,
+      v: 2,
       character: { level: (character && character.level) || 200 },
+      distribution: { ...(loadout.distribution || createDistribution()) },
       slots: Object.fromEntries(
-        SLOT_ORDER.map((slot) => [slot, loadout.slots[slot].map((e) => ({ itemId: e.itemId, roll: e.roll }))])
+        SLOT_ORDER.map((slot) => [slot, loadout.slots[slot].map((e) => ({
+          itemId: e.itemId,
+          roll: e.roll,
+          exotic: e.exotic && e.exotic.length ? [...e.exotic] : undefined,
+        }))])
       ),
     };
   }
 
   function importLoadout(payload) {
     const loadout = createLoadout();
-    if (!payload || !payload.slots) return loadout;
+    if (!payload) return loadout;
+
+    // Les builds antérieurs à la v2 n'ont pas de répartition : on repart de
+    // zéro plutôt que d'inventer des points.
+    if (payload.distribution) {
+      for (const stat of POINT_STATS) {
+        loadout.distribution[stat] = Math.max(0, Math.round(Number(payload.distribution[stat]) || 0));
+      }
+    }
+    if (!payload.slots) return loadout;
+
     for (const slot of SLOT_ORDER) {
       const list = payload.slots[slot] || [];
       loadout.slots[slot] = list
         .slice(0, SLOT_CAPACITY[slot] || 1)
-        .map((e) => ({ itemId: e.itemId, roll: e.roll || {} }));
+        .map((e) => ({
+          itemId: e.itemId,
+          roll: e.roll || {},
+          exotic: Array.isArray(e.exotic) ? e.exotic.map(Number) : [],
+        }));
     }
     return loadout;
   }
@@ -457,9 +678,13 @@
   return {
     BASE_CHARACTER, SET_BONUS_CUMULATIVE, SLOT_CAPACITY, SLOT_ORDER, SLOT_LABELS,
     STAT_GROUPS, ALL_STATS,
+    POINTS_PER_LEVEL, POINT_STATS, STAT_POINT_COSTS,
     hashSeed, makeRng, indexData, loadData,
     rollItem, checkRequirements,
     createLoadout, equip, unequip, equippedEntries, slotFree,
+    createDistribution, pointsAvailable, pointsSpent, costToBuy, costOfNextPoint,
+    spendPoints, refundPoints,
+    setEffectValue, addExoticEffect, removeExoticEffect, effectiveEffects, rerollEntry,
     activeSets, computeStats, filterItems, describeEffect,
     exportLoadout, importLoadout,
   };
