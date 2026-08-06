@@ -354,6 +354,60 @@
     return out;
   }
 
+  /* ========================================================================
+     Déplacements forcés
+     ------------------------------------------------------------------------
+     Poussée et attirance suivent la ligne lanceur → cible, ramenée au pas
+     cardinal dominant : c'est la règle du jeu, et elle est sans ambiguïté sur
+     une grille en diamant où l'on ne se déplace que de quatre façons.
+
+     Le trajet se fait CASE PAR CASE et s'arrête au premier obstacle — bord,
+     mur, trou, autre combattant. Les cases non parcourues sont comptées et
+     rendues : en Dofus elles infligent des dommages de collision, dont la
+     formule reste à confirmer et n'est donc pas appliquée ici.
+     ======================================================================== */
+
+  /** Pas cardinal dominant d'une case vers une autre, ou null si confondues. */
+  function pushDirection(grid, fromCell, toCell) {
+    const a = grid.idToCoord(fromCell), b = grid.idToCoord(toCell);
+    const dx = b.x - a.x, dy = b.y - a.y;
+    if (dx === 0 && dy === 0) return null;
+    return Math.abs(dx) >= Math.abs(dy)
+      ? { x: Math.sign(dx), y: 0 }
+      : { x: 0, y: Math.sign(dy) };
+  }
+
+  /**
+   * Déplace une entité de `cases` cases dans une direction donnée.
+   *
+   * `occupants` est mis à jour au passage, sans quoi deux poussées successives
+   * dans le même lancer se traverseraient. L'entité est déplacée en place.
+   */
+  function forcedMove(grid, map, occupants, entity, dir, cases) {
+    const depart = entity.cellId;
+    let courant = depart, faites = 0, obstacle = null;
+
+    for (let i = 0; i < cases; i++) {
+      const c = grid.idToCoord(courant);
+      const suivant = grid.coordToId(c.x + dir.x, c.y + dir.y);
+      if (suivant < 0) { obstacle = "le bord de la carte"; break; }
+      if (map && !map.walkable(suivant)) {
+        obstacle = map.cells[suivant] === Grid.CELL_HOLE ? "un trou" : "un obstacle";
+        break;
+      }
+      const occupant = occupants && occupants.get(suivant);
+      if (occupant) { obstacle = occupant.name; break; }
+      courant = suivant;
+      faites++;
+    }
+
+    if (faites) {
+      if (occupants) { occupants.delete(depart); occupants.set(courant, entity); }
+      entity.cellId = courant;
+    }
+    return { from: depart, to: courant, faites, bloquees: cases - faites, obstacle };
+  }
+
   /**
    * Applique des dégâts en tenant compte du bouclier, qui absorbe en premier.
    */
@@ -493,13 +547,43 @@
 
           case "push":
           case "pull": {
-            // Le déplacement forcé n'est pas encore résolu sur la grille : on
-            // le journalise sans l'appliquer, plutôt que de déplacer au hasard.
+            // Un lanceur poussé par son propre sort n'a pas de direction : la
+            // ligne lanceur → cible est alors dégénérée.
+            const axe = pushDirection(grid, caster.cellId, cible.cellId);
+            if (!axe) {
+              journal.push({
+                type: "non-applique",
+                texte: `${effet.label} : ${cible.name} est sur la case du lanceur, aucune direction`,
+                cible: cible.id,
+              });
+              break;
+            }
+            const sens = effet.kind === "push"
+              ? axe
+              : { x: -axe.x, y: -axe.y };
+            const dep = forcedMove(grid, map, occupants, cible, sens, jet);
+
             journal.push({
-              type: "non-applique",
-              texte: `${effet.label} : déplacement forcé non encore implémenté (${jet} case(s))`,
-              cible: cible.id,
+              type: "deplacement",
+              texte: dep.faites
+                ? `${cible.name} est ${effet.kind === "push" ? "repoussé" : "attiré"} de ${dep.faites} case(s)`
+                  + ` (${dep.from} → ${dep.to})`
+                  + (dep.bloquees ? `, arrêté par ${dep.obstacle}` : "")
+                : `${cible.name} ne bouge pas : ${dep.obstacle} bloque immédiatement`,
+              cible: cible.id, montant: dep.faites, detail: dep,
             });
+
+            // En Dofus, les cases non parcourues infligent des dommages de
+            // collision. La formule n'étant pas confirmée, on la signale au
+            // lieu de l'inventer : un effet compté à tort est invisible.
+            if (dep.bloquees) {
+              journal.push({
+                type: "non-applique",
+                texte: `Dommages de collision non appliqués (${dep.bloquees} case(s) bloquée(s)) :`
+                     + " formule à confirmer",
+                cible: cible.id,
+              });
+            }
             break;
           }
 
@@ -537,6 +621,7 @@
     variantGroups, defaultSelection, activeSpells, cycleVariant,
     zoneCells, canCast, rangeCells,
     computeDamage, makeEntity, effectiveStats, applyDamage,
+    pushDirection, forcedMove,
     castSpell, tickBuffs,
   };
 });

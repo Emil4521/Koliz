@@ -84,6 +84,16 @@ function extraire(mock, args, env) {
   assert.ok(niveau.effects.some((e) => e.kind === "drainPm"), "retrait PM reconnu");
 
   assert.ok(/non classés/.test(rapport), "les effets non classés sont listés");
+
+  // Le libellé seul ne dit pas ce que portent diceNum, diceSide et value : un
+  // modificateur y range l'identifiant du sort visé, un jet de dommages y range
+  // ses bornes. Les trois nombres sont donc conservés, et un exemplaire brut
+  // par identifiant non classé figure au rapport.
+  assert.deepStrictEqual(degats.dice, { num: 16, side: 20, value: 0 },
+    "les trois nombres sources sont conservés");
+  assert.ok(/Forme brute d'un exemplaire/.test(rapport), "un exemplaire brut est exposé");
+  assert.ok(/9999 \{"effectId":9999/.test(rapport), "avec tous ses champs");
+  assert.ok(/Masques de cible rencontrés/.test(rapport), "les masques de cible sont recensés");
   assert.ok(/Formes de zone non décodées/.test(rapport), "les zones inconnues sont listées");
 
   /* --- Variantes ---------------------------------------------------------

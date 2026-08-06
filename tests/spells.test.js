@@ -253,6 +253,73 @@ const carte = () => G.makeMap(grid);
   assert.strictEqual(S.levelFor(spell, 200).level, 6, "niveau 200 : dernier palier");
 }
 
+/* --- Déplacements forcés ----------------------------------------------------
+   La grille en diamant n'est pas un rectangle : à y = 6, x ne va que de 6 à 15.
+   Les cases ci-dessous sont toutes vérifiées sur la grille de test. */
+{
+  const m = carte();
+  const cible = S.makeEntity({ id: "C", name: "Cible", cellId: at(9, 6) });
+
+  // Direction : le pas cardinal dominant, du lanceur vers la cible.
+  assert.deepStrictEqual(S.pushDirection(grid, at(6, 6), at(9, 6)), { x: 1, y: 0 }, "vers l'est");
+  assert.deepStrictEqual(S.pushDirection(grid, at(9, 6), at(6, 6)), { x: -1, y: 0 }, "vers l'ouest");
+  assert.deepStrictEqual(S.pushDirection(grid, at(8, 6), at(8, 8)), { x: 0, y: 1 }, "vers le sud");
+  // À égalité, l'axe des x l'emporte — un choix, mais un choix stable.
+  assert.deepStrictEqual(S.pushDirection(grid, at(8, 6), at(10, 8)), { x: 1, y: 0 }, "égalité : axe x");
+  assert.strictEqual(S.pushDirection(grid, at(8, 6), at(8, 6)), null, "case confondue : aucune direction");
+
+  // Poussée libre : la cible parcourt toutes les cases demandées.
+  {
+    const e = { ...cible, cellId: at(9, 6) };
+    const occupants = new Map([[e.cellId, e]]);
+    const r = S.forcedMove(grid, m, occupants, e, { x: 1, y: 0 }, 3);
+    assert.strictEqual(r.faites, 3, "trois cases parcourues");
+    assert.strictEqual(r.bloquees, 0, "aucune case bloquée");
+    assert.strictEqual(e.cellId, at(12, 6), "la position est bien mise à jour");
+    assert.ok(occupants.has(at(12, 6)) && !occupants.has(at(9, 6)),
+      "les occupants suivent, sans quoi deux poussées se traverseraient");
+  }
+
+  // Obstacle : arrêt net, et les cases non parcourues sont comptées — ce sont
+  // elles qui portent les dommages de collision.
+  {
+    const mur = at(11, 6);
+    m.cells[mur] = 1;   // CELL_WALL
+    const e = { ...cible, cellId: at(9, 6) };
+    const r = S.forcedMove(grid, m, new Map(), e, { x: 1, y: 0 }, 4);
+    assert.strictEqual(r.faites, 1, "arrêt devant le mur");
+    assert.strictEqual(r.bloquees, 3, "trois cases non parcourues");
+    assert.strictEqual(e.cellId, at(10, 6), "immobilisé juste avant l'obstacle");
+    m.cells[mur] = 0;
+  }
+
+  // Un autre combattant bloque, et se nomme dans le journal.
+  {
+    const bloqueur = S.makeEntity({ id: "B", name: "Bloqueur", cellId: at(10, 6) });
+    const e = { ...cible, cellId: at(9, 6) };
+    const r = S.forcedMove(grid, m, new Map([[at(10, 6), bloqueur]]), e, { x: 1, y: 0 }, 3);
+    assert.strictEqual(r.faites, 0, "bloqué dès la première case");
+    assert.strictEqual(r.obstacle, "Bloqueur", "l'obstacle est nommé");
+    assert.strictEqual(e.cellId, at(9, 6), "la cible n'a pas bougé");
+  }
+
+  // Le bord de la carte arrête aussi : à y = 6, x = 6 est la dernière case.
+  {
+    const e = { ...cible, cellId: at(6, 6) };
+    const r = S.forcedMove(grid, m, new Map(), e, { x: -1, y: 0 }, 2);
+    assert.strictEqual(r.faites, 0, "on ne sort pas de la carte");
+    assert.ok(/bord/.test(r.obstacle), "le bord est nommé");
+  }
+
+  // Attirance : sens inverse de la poussée, mêmes règles d'arrêt.
+  {
+    const e = { ...cible, cellId: at(9, 6) };
+    const r = S.forcedMove(grid, m, new Map(), e, { x: -1, y: 0 }, 2);
+    assert.strictEqual(e.cellId, at(7, 6), "attirée vers le lanceur");
+    assert.strictEqual(r.faites, 2, "deux cases");
+  }
+}
+
 /* --- Variantes : un sort OU son alternative, jamais les deux ---------------- */
 {
   const sort = (id, name, groupe, rang) =>

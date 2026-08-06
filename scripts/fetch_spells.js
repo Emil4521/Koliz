@@ -583,6 +583,18 @@ function diagnosticVariantes(ctx, reporter) {
    Transformation
    ========================================================================== */
 
+/**
+ * Retient un effet non classé, avec UN exemplaire de sa forme brute.
+ *
+ * Le libellé seul ne suffit pas à décider quoi faire d'un effet : « #1 : +#3
+ * Portée minimale » range l'identifiant du sort visé et la valeur dans deux
+ * champs distincts, et rien dans la sortie transformée ne dit lequel. Un
+ * exemplaire brut par identifiant tranche la question sans run supplémentaire.
+ */
+function noter(nonClasses, effectId, raw) {
+  if (!nonClasses.has(effectId)) nonClasses.set(effectId, raw);
+}
+
 /** Décode la forme d'une zone d'effet. */
 function decodeZone(raw, reporter, inconnues) {
   if (!raw || typeof raw !== "object") return { type: "point", size: 0 };
@@ -621,14 +633,14 @@ function transformEffect(raw, effectMap, reporter, inconnues, nonClasses) {
       `effectId ${effectId} : la table attend « ${connu.label} », l'API répond « ${def.label} ». `
       + "Classification suspendue pour cet effet."
     );
-    nonClasses.add(effectId);
+    noter(nonClasses, effectId, raw);
     return baseEffect(effectId, raw, def, null);
   }
 
   let kind = connu ? connu.kind : null;
   // Un effet porteur d'une statistique et d'une durée est un boost.
   if (!kind && def && def.statKey && Number(raw.duration) !== 0) kind = "boost";
-  if (!kind) nonClasses.add(effectId);
+  if (!kind) noter(nonClasses, effectId, raw);
 
   const effet = baseEffect(effectId, raw, def, kind);
   if (connu) {
@@ -655,6 +667,12 @@ function baseEffect(effectId, raw, def, kind) {
     kind,
     label: (def && def.label) || `effet ${effectId}`,
     min, max,
+    // Les TROIS nombres sources, conservés tels quels. `min`/`max` en sont une
+    // lecture — juste pour un jet de dommages, fausse pour les effets qui
+    // rangent autre chose dans ces cases : un modificateur de sort met
+    // l'identifiant du sort visé dans `diceNum` et sa valeur dans `value`.
+    // Sans les trois nombres, impossible de les distinguer après coup.
+    dice: { num: diceNum, side: diceSide, value },
     duration: Number(raw.duration ?? 0),
     targetMask: raw.targetMask || null,
     delay: Number(raw.delay ?? 0),
@@ -741,7 +759,7 @@ async function main() {
   // la liaison vers les variantes, et il faut connaître la liste complète des
   // sorts — jumeaux compris — avant de payer une requête de palier par sort.
   const inconnues = new Set();      // formes de zone non décodées
-  const nonClasses = new Set();     // effets dont la nature n'est pas confirmée
+  const nonClasses = new Map();     // effectId → un exemplaire brut, pour le rapport
   const spells = [];
   const sansPalier = [];
 
@@ -885,13 +903,46 @@ async function main() {
   if (nonClasses.size) {
     reporter.info("");
     reporter.info(`Effets de sort non classés (${nonClasses.size}) — affichés, jamais appliqués :`);
-    const tri = [...nonClasses].sort((a, b) => a - b);
+    const tri = [...nonClasses.keys()].sort((a, b) => a - b);
     for (const id of tri.slice(0, 30)) {
       reporter.info(`  ${String(id).padStart(5)} : « ${(effectMap[id] || {}).label || "?"} »`);
     }
     if (tri.length > 30) reporter.info(`  … et ${tri.length - 30} autres`);
     reporter.info("  Chacun est soit une mécanique à ajouter à SPELL_EFFECT_KINDS,");
     reporter.info("  soit un effet hors périmètre du 1v1.");
+
+    // Un exemplaire brut par identifiant : c'est là que se lit ce que chaque
+    // champ porte réellement, et c'est ce qui manquait pour trancher entre
+    // « diceNum est un jet » et « diceNum est l'identifiant du sort visé ».
+    reporter.info("");
+    reporter.info("Forme brute d'un exemplaire de chacun — pour décider quoi en faire :");
+    for (const id of tri) {
+      reporter.info(`  ${String(id).padStart(5)} ${JSON.stringify(nonClasses.get(id))}`);
+    }
+  }
+
+  // Alphabet des masques de cible réellement rencontrés. Le moteur les ignore
+  // encore — il applique chaque effet à toute entité de la zone — ce qui est
+  // faux dès qu'un sort se lance sur soi. Les recenser est le préalable.
+  const masques = new Map();
+  for (const s of spells) {
+    for (const niv of s.levels) {
+      for (const e of [...niv.effects, ...niv.criticalEffects]) {
+        for (const jeton of String(e.targetMask || "").split(",")) {
+          if (!jeton) continue;
+          const lettre = jeton.replace(/[0-9]+$/, "");
+          if (!masques.has(lettre)) masques.set(lettre, { n: 0, exemple: `${s.name} / ${e.label}` });
+          masques.get(lettre).n++;
+        }
+      }
+    }
+  }
+  if (masques.size) {
+    reporter.info("");
+    reporter.info(`Masques de cible rencontrés (${masques.size}) — non encore interprétés :`);
+    for (const [lettre, v] of [...masques].sort((a, b) => b[1].n - a[1].n)) {
+      reporter.info(`  ${lettre.padEnd(4)} ${String(v.n).padStart(4)}  ex. ${v.exemple}`);
+    }
   }
   if (inconnues.size) {
     reporter.info("");

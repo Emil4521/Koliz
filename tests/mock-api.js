@@ -172,8 +172,12 @@ function mkLevel(spellId, grade, apCost, minRange, range, effects, extra = {}) {
     castTestLos: true, rangeCanBeBoosted: false,
     criticalHitProbability: 30, maxCastPerTurn: 2, minPlayerLevel: grade * 10,
     zoneDescr: { shape: 80, param1: 0, param2: 0 },   // 'P' : case unique
-    effects: effects.map(([effectId, diceNum, diceSide, duration]) =>
-      ({ effectId, diceNum, diceSide, value: 0, duration: duration || 0 })),
+    // `targetMask` dit QUI l'effet touche — le lanceur (« C ») n'est pas la
+    // cible (« A »). Le moteur ne l'interprète pas encore ; l'extraction doit
+    // au moins le recenser pour qu'on sache ce qu'il reste à traiter.
+    effects: effects.map(([effectId, diceNum, diceSide, duration, targetMask]) =>
+      ({ effectId, diceNum, diceSide, value: 0, duration: duration || 0,
+         targetMask: targetMask || "a,A" })),
     criticalEffects: [],
     ...extra,
   };
@@ -183,7 +187,7 @@ function mkLevel(spellId, grade, apCost, minRange, range, effects, extra = {}) {
 const SPELL_LEVELS = [
   mkLevel(101, 1, 3, 1, 1, [[97, 2, 15]]),
   mkLevel(101, 6, 4, 1, 1, [[97, 16, 20]]),
-  mkLevel(102, 6, 2, 0, 0, [[118, 40, 40, 3]]),
+  mkLevel(102, 6, 2, 0, 0, [[118, 40, 40, 3, "C"]]),   // buff sur SOI
   mkLevel(103, 6, 4, 1, 8, [[98, 21, 25]], {
     rangeCanBeBoosted: true,
     zoneDescr: { shape: 67, param1: 2, param2: 0 },   // 'C' : disque de 2
