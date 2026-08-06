@@ -582,6 +582,9 @@ async function boot() {
   const groupesMultiples = Object.values(state.data.groupsByClass)
     .reduce((n, gs) => n + gs.filter((g) => g.spells.length > 1).length, 0);
   $("provenance").textContent = [
+    // La version du moteur vient du CODE, la date d'extraction des DONNÉES :
+    // les deux ensemble disent lequel des deux est en retard.
+    `moteur ${S.MODULE_VERSION}`,
     meta.source || "?",
     `${state.data.spells.length} sorts`,
     groupesMultiples ? `${groupesMultiples} groupes de variantes` : "aucune variante",

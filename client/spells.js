@@ -31,6 +31,17 @@
      porté par la force, comme dans le jeu.
      ======================================================================== */
 
+  /**
+   * Version du module, affichée par la page.
+   *
+   * Les données portent déjà leur date d'extraction, mais le CODE n'avait
+   * aucune marque : impossible de distinguer « le déploiement n'est pas passé »
+   * de « le navigateur sert un ancien spells.js » — deux pannes identiques à
+   * l'écran, et qui ont coûté trois allers-retours. À bomber à chaque
+   * changement de comportement du module.
+   */
+  const MODULE_VERSION = "0.3.2";
+
   const ELEMENT_STATS = {
     terre:  { carac: "force",        domFixe: "domTerre",  resPct: "resPctTerre",  resFixe: "resFixeTerre" },
     feu:    { carac: "intelligence", domFixe: "domFeu",    resPct: "resPctFeu",    resFixe: "resFixeFeu" },
@@ -616,6 +627,7 @@
   }
 
   return {
+    MODULE_VERSION,
     ELEMENT_STATS, ELEMENT_LABELS,
     indexData, levelFor,
     variantGroups, defaultSelection, activeSpells, cycleVariant,
