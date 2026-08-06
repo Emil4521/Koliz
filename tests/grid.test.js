@@ -194,4 +194,64 @@ const rand = (n) => (Math.random() * n) | 0;
   assert.notStrictEqual(a, c, "graines différentes, cartes différentes");
 }
 
+/* --- Déplacement : cases atteignables et chemin ----------------------------- */
+{
+  const g = G.makeGrid(14, 20);
+  const at = (x, y) => g.coordToId(x, y);
+  const map = G.makeMap(g);
+  const depart = at(10, 6);
+
+  // Sur terrain dégagé, le nombre de cases à distance <= n d'un point vaut
+  // 2n² + 2n : 4 à 1 PM, 12 à 2 PM. C'est la même géométrie que le disque des
+  // zones d'effet, décomptée sans la case centrale.
+  assert.strictEqual(G.reachableCells(g, map, depart, 1).size, 4, "1 PM : quatre cases");
+  assert.strictEqual(G.reachableCells(g, map, depart, 2).size, 12, "2 PM : douze cases");
+  assert.ok(!G.reachableCells(g, map, depart, 3).has(depart), "la case de départ n'y figure pas");
+
+  // Le coût annoncé est bien la distance de la grille.
+  for (const [id, info] of G.reachableCells(g, map, depart, 3)) {
+    assert.strictEqual(info.cost, G.cellDistance(g.idToCoord(id), g.idToCoord(depart)),
+      "coût = distance en diamant");
+  }
+
+  // Murs et trous ne se traversent pas — un trou bloque le pas même s'il
+  // laisse passer la ligne de vue.
+  {
+    const m = G.makeMap(g);
+    for (const [x, y] of [[11, 6], [9, 6], [10, 7]]) m.cells[at(x, y)] = G.CELL_WALL;
+    m.cells[at(10, 5)] = G.CELL_HOLE;
+    assert.strictEqual(G.reachableCells(g, m, depart, 5).size, 0, "encerclé : aucune case");
+  }
+
+  // Un combattant bloque : on ne le traverse pas et on ne s'arrête pas dessus.
+  {
+    const m = G.makeMap(g);
+    for (const [x, y] of [[10, 5], [10, 7], [9, 6]]) m.cells[at(x, y)] = G.CELL_WALL;
+    const libre = G.reachableCells(g, m, depart, 4);
+    const barre = G.reachableCells(g, m, depart, 4, { blocked: new Set([at(11, 6)]) });
+    assert.ok(libre.size > 0 && barre.size === 0,
+      "le seul passage étant occupé, plus rien n'est atteignable");
+  }
+
+  // Chemin : départ exclu, arrivée incluse, longueur égale au coût.
+  {
+    const acces = G.reachableCells(g, map, depart, 4);
+    const arrivee = at(13, 6);
+    const chemin = G.pathTo(acces, arrivee);
+    assert.strictEqual(chemin.length, 3, "trois pas");
+    assert.strictEqual(chemin[chemin.length - 1], arrivee, "se termine à l'arrivée");
+    assert.ok(!chemin.includes(depart), "ne contient pas le départ");
+    // Chaque pas est un voisin du précédent : pas de saut.
+    let precedent = depart;
+    for (const id of chemin) {
+      assert.ok(G.neighbors(g, precedent).includes(id), "pas à pas, sans diagonale");
+      precedent = id;
+    }
+    assert.deepStrictEqual(G.pathTo(acces, at(0, 0)), [], "case inatteignable : chemin vide");
+  }
+
+  // Un budget nul n'ouvre rien — le cas du combattant sans PM.
+  assert.strictEqual(G.reachableCells(g, map, depart, 0).size, 0, "0 PM : aucun déplacement");
+}
+
 console.log("grid.test.js : OK");

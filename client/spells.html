@@ -115,6 +115,7 @@
   #log .drain { color: var(--warn); }
   #log .mort { color: var(--ko); font-weight: 600; }
   #log .refus, #log .avertissement, #log .non-applique { color: var(--warn); }
+  #log .deplacement { color: #9ee8c5; }
   #log .info { color: var(--muted); }
   #log .tour { color: #fff; background: #232833; }
   .empty-msg { color: var(--muted); text-align: center; padding: 26px 10px; }
@@ -171,6 +172,7 @@ const COLORS = {
   freeA: "#2b313d", freeB: "#262c37", wall: "#59616f", hole: "#0d0f14",
   edge: "#1a1e26", portee: "rgba(90,169,230,0.20)", zone: "rgba(245,165,36,0.38)",
   hover: "rgba(255,255,255,0.12)",
+  deplacement: "rgba(76,195,138,0.16)", chemin: "rgba(76,195,138,0.42)",
   equipes: { a: "#4cc38a", b: "#e5484d" },
 };
 
@@ -180,6 +182,8 @@ const state = {
   // Grimoire : pour chaque groupe de variantes, le sort emporté.
   variantes: new Map(),
   hoverCell: -1, level: 200,
+  // Cases atteignables à la marche, recalculées à chaque rendu.
+  atteignables: new Map(),
   hw: 22, hh: 11, dpr: 1,
 };
 
@@ -276,8 +280,19 @@ function dessiner() {
     ctx.strokeStyle = COLORS.edge; ctx.lineWidth = 1; ctx.stroke();
   }
 
-  // Portée du sort choisi, puis zone d'effet sous le curseur.
+  // Sans sort choisi, le terrain montre où l'on peut marcher : les cases
+  // atteignables, et le chemin exact sous le curseur.
   const niveau = niveauChoisi();
+  if (!niveau) {
+    for (const id of state.atteignables.keys()) remplir(id, COLORS.deplacement, 1);
+    if (state.atteignables.has(state.hoverCell)) {
+      for (const id of G.pathTo(state.atteignables, state.hoverCell)) {
+        remplir(id, COLORS.chemin, 1);
+      }
+    }
+  }
+
+  // Portée du sort choisi, puis zone d'effet sous le curseur.
   if (niveau) {
     for (const id of S.rangeCells(grid, map, actif(), niveau, {
       occupants: occupants(), rangeBonus: actif().stats.po || 0,
@@ -468,14 +483,31 @@ function journalise(entrees) {
   log.scrollTop = log.scrollHeight;
 }
 
+/**
+ * Cases où le combattant actif peut marcher, dans la limite de ses PM.
+ * On ne traverse pas un adversaire, et on ne s'arrête pas sur lui.
+ */
+function calculerDeplacement() {
+  const e = actif();
+  if (state.spellChoisi || !e || e.life <= 0 || e.pm <= 0) return new Map();
+  const occupees = new Set(
+    state.entities.filter((x) => x.life > 0 && x.id !== e.id).map((x) => x.cellId)
+  );
+  return G.reachableCells(state.grid, state.map, e.cellId, e.pm, { blocked: occupees });
+}
+
 function render() {
+  state.atteignables = calculerDeplacement();
   renderEntities();
   renderSpells();
   dessiner();
   const niveau = niveauChoisi();
+  const e = actif() || { pm: 0 };
   $("hint").textContent = niveau
     ? `Cliquez une case pour lancer ${state.spellChoisi.name}`
-    : "Choisissez un sort à gauche";
+    : e.pm > 0
+      ? `Cliquez une case verte pour vous déplacer (${e.pm} PM) — ou choisissez un sort`
+      : "Plus de PM : choisissez un sort, ou finissez le tour";
 }
 
 /* ==========================================================================
@@ -498,7 +530,21 @@ cv.addEventListener("click", (ev) => {
   const cible = caseSous(ev);
   if (cible < 0) return;
   const niveau = niveauChoisi();
-  if (!niveau) return;
+
+  // Aucun sort choisi : le clic déplace, au prix d'un PM par case.
+  if (!niveau) {
+    const acces = state.atteignables.get(cible);
+    if (!acces) return;
+    const e = actif();
+    e.cellId = cible;
+    e.pm -= acces.cost;
+    journalise([{
+      type: "deplacement",
+      texte: `${e.name} se déplace de ${acces.cost} case(s) — ${e.pm} PM restants`,
+    }]);
+    render();
+    return;
+  }
 
   const res = S.castSpell({
     grid: state.grid, map: state.map, caster: actif(),

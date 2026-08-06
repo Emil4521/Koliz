@@ -106,8 +106,13 @@ de [nodejs.org](https://nodejs.org).
 - Sorts de la classe du combattant actif, avec coût en PA, portée et effets.
 - **Choix de variante** : un sort ou son alternative, jamais les deux. La
   bascule `⇄ 1/2` remplace le sort dans le grimoire au lieu de s'y ajouter.
+- **Déplacement aux PM** : sans sort choisi, les cases atteignables s'allument
+  en vert et le chemin exact ressort au survol. Un pas coûte 1 PM, suit les
+  quatre voisins cardinaux, ne traverse ni mur, ni trou, ni combattant.
 - **Aperçu de portée** au choix du sort, **aperçu de la zone d'effet** au survol.
 - Lancer résolu : consommation des PA, coup critique, zone, effets appliqués.
+- **Poussée et attirance résolues** sur la grille : trajet case par case,
+  arrêt au premier obstacle, cases bloquées décomptées.
 - **Journal de combat détaillé** — chaque calcul de dégâts est affiché en clair
   (`18 × (1 + 100%) = 36 → 36, puis −0% → 36`), pour pouvoir comparer au jeu
   ligne à ligne plutôt que de constater un total qui ne tombe pas juste.
@@ -238,8 +243,12 @@ donc toujours disponible.
 
 ### Limites connues
 
-- Le **déplacement forcé** (poussée, attirance) est journalisé mais pas encore
-  résolu sur la grille : déplacer au hasard serait pire que ne rien faire.
+- Le moteur **n'interprète pas encore `targetMask`** : chaque effet s'applique
+  à toute entité de la zone. Un sort lancé sur soi — le bouclier de Ferveur,
+  masque `C,a` — profite donc aussi à l'adversaire. 23 lettres de masque ont
+  été recensées ; les décoder est le prochain chantier.
+- Les **dommages de collision** d'une poussée bloquée sont comptés en cases
+  mais pas appliqués : la formule n'est pas confirmée, et le journal le dit.
 - Les **formes de zone** non décodées se replient sur la case visée et le
   signalent, plutôt que d'inventer une surface.
 - Le banc d'essai utilise des statistiques fixes ; le raccordement à la page

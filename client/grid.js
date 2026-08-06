@@ -236,6 +236,64 @@
     return out;
   }
 
+  /* ========================================================================
+     Déplacement
+     ------------------------------------------------------------------------
+     Un pas coûte 1 PM et suit les quatre voisins cardinaux — jamais la
+     diagonale, qui n'existe pas comme déplacement dans le jeu.
+
+     Le parcours est un simple parcours en largeur : tous les pas coûtant le
+     même prix, la première fois qu'on atteint une case c'est déjà par le plus
+     court chemin. Inutile d'aller chercher A* pour un budget de quelques PM.
+     ======================================================================== */
+
+  /**
+   * Cases atteignables depuis `from` avec un budget de `maxCost` pas.
+   *
+   * Rend une Map `id → { cost, prev }` : `cost` est le nombre de PM dépensés,
+   * `prev` la case d'où l'on vient, ce qui permet de remonter le chemin. La
+   * case de départ n'y figure pas — on ne se déplace pas sur place.
+   *
+   * `options.blocked` contient les cases occupées par un combattant : on ne
+   * traverse pas quelqu'un, et on ne s'arrête pas sur lui non plus.
+   */
+  function reachableCells(grid, map, from, maxCost, options) {
+    const bloquees = (options && options.blocked) || new Set();
+    const vus = new Map([[from, { cost: 0, prev: -1 }]]);
+    let front = [from];
+
+    for (let cost = 1; cost <= maxCost && front.length; cost++) {
+      const suivant = [];
+      for (const id of front) {
+        for (const v of neighbors(grid, id)) {
+          if (vus.has(v)) continue;
+          if (map && !map.walkable(v)) continue;
+          if (bloquees.has(v)) continue;
+          vus.set(v, { cost, prev: id });
+          suivant.push(v);
+        }
+      }
+      front = suivant;
+    }
+
+    vus.delete(from);
+    return vus;
+  }
+
+  /**
+   * Remonte le chemin jusqu'à `target`, départ exclu, arrivée incluse.
+   * Rend un tableau vide si la case n'est pas atteignable.
+   */
+  function pathTo(reachable, target) {
+    const chemin = [];
+    let courant = target;
+    while (reachable.has(courant)) {
+      chemin.unshift(courant);
+      courant = reachable.get(courant).prev;
+    }
+    return chemin;
+  }
+
   /**
    * Génère une carte : obstacles aléatoires (par amas, plus lisibles que du
    * bruit pur), zones de départ opposées dégagées, et connectivité garantie
@@ -356,5 +414,6 @@
     cmpFrac, slabInterval, segmentEntersCell, traversedCells, lineOfSight,
     CELL_FREE, CELL_WALL, CELL_HOLE,
     makeMap, makeRng, hashSeed, neighbors, generateMap, carveConnection,
+    reachableCells, pathTo,
   };
 });
