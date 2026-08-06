@@ -179,6 +179,7 @@ liaison passant par une liste d'identifiants portée par la classe :
 | `/breeds` | `breedSpellsId` : les identifiants de sorts de chaque classe |
 | `/spells/<id>?lang=fr` | Nom et description — route par **chemin**, rend un objet, pas une enveloppe paginée |
 | `/spell-levels?spellId=<id>` | Coût en PA, portée, zone, effets : toutes les données de jeu |
+| `/spell-variants?breedId=<id>` | Les groupes de variantes de la classe — voir plus bas |
 
 Un filtre `breedId` sur `/spells` répond **sans erreur et sans résultat** — le
 piège qui a coûté deux runs.
@@ -191,24 +192,37 @@ niveau, qui est le seul combat visé.
 
 Chaque sort du grimoire possède une version alternative : on emporte l'une **ou**
 l'autre, jamais les deux. `breedSpellsId` ne liste que la première de chaque
-paire — la seconde existe côté API, mais sous une liaison que rien ne documente.
+paire ; la seconde vit dans une collection à part, interrogée **classe par
+classe** :
 
-Plutôt que de parier sur un nom de champ, l'extraction essaie trois pistes par
-ordre de coût croissant et s'arrête à la première productive :
+```
+/spell-variants?breedId=<id>&$skip=0&lang=fr
+```
 
-| Piste | Forme cherchée | Coût |
-|---|---|---|
-| Liste sur le sort | un champ `*variant*` du document `/spells/<id>` énumère les jumeaux | nul, les documents sont déjà en mémoire |
-| Pointeur sur le sort | un champ `*variant*` numérique, résolu par `/spells?<champ>=<valeur>` | une requête par groupe |
-| Collection dédiée | `/spell-variants` (ou variantes de nom) regroupe les identifiants | une passe de pagination |
+Cette collection rend **une dizaine d'entrées par page**, quel que soit le
+`$limit` demandé. La pagination s'appuie donc sur le nombre de lignes *reçues*,
+jamais sur la taille de page réclamée — la fausse API de test plafonne
+délibérément ses pages, et place le seul groupe exploitable en seconde page pour
+qu'une régression sur ce point se voie.
 
-Deux garde-fous, tirés des erreurs précédentes :
+Interroger par classe rattache en outre chaque groupe à sa classe sans passer
+par un jumeau déjà connu, ce qui reste vrai même si les *deux* versions d'un
+sort manquent à `breedSpellsId`.
 
-- Le filtre du deuxième cas est **sondé sur une seule page**. Une API qui ignore
-  un filtre inconnu rend la collection entière, et la parcourir coûterait des
+Deux pistes de repli suivent, au cas où le schéma bougerait — un champ
+`*variant*` sur le document `/spells/<id>`, sous forme de liste ou de pointeur
+numérique résolu par `/spells?<champ>=<valeur>`.
+
+Trois garde-fous, tirés des erreurs précédentes :
+
+- Un filtre inconnu est parfois **ignoré** plutôt que refusé. Si deux classes
+  reçoivent le même groupe, l'extraction le voit et repasse en lecture non
+  filtrée, où la classe se déduit du jumeau.
+- Le filtre de la piste de repli est **sondé sur une seule page** : une API qui
+  l'ignore rendrait la collection entière, et la parcourir coûterait des
   milliers de requêtes pour rien.
-- Un groupe de plus de six membres est **refusé** : c'est le signe d'un filtre
-  ignoré, pas d'un sort à six variantes.
+- Un groupe de plus de six membres est **refusé** : signe d'un filtre ignoré,
+  pas d'un sort à six variantes.
 
 Si aucune piste n'aboutit, l'extraction **réussit quand même** — le grimoire se
 comporte comme avant — mais nomme le manque et affiche les documents bruts :

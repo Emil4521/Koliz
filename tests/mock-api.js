@@ -116,20 +116,42 @@ const BREEDS = [
 ];
 
 /* Variantes — un sort du grimoire a une version alternative, et on emporte
-   l'une OU l'autre. La liaison passe par `spellVariantId`, résolu en demandant
-   à l'API tous les sorts portant la même valeur : le jumeau ne figure PAS dans
-   `breedSpellsId`, c'est tout le problème que cette extraction résout.
+   l'une OU l'autre. Le jumeau ne figure PAS dans `breedSpellsId` : c'est tout
+   le problème que cette extraction résout.
 
-   `KOLIZEUM_MOCK_NO_VARIANTS=1` retire cette liaison pour rejouer l'état de
-   production d'avant : l'extraction doit alors réussir quand même, en le
-   signalant et en exposant les documents bruts. */
-const SANS_VARIANTES = process.env.KOLIZEUM_MOCK_NO_VARIANTS === "1";
+   La liaison réelle passe par une collection dédiée, interrogée classe par
+   classe : `/spell-variants?breedId=8`. Trois modes rejouables :
+
+     collection  la liaison confirmée (défaut)
+     pointeur    un champ `spellVariantId` sur le document de sort (repli)
+     aucune      rien du tout : l'état de production d'avant */
+const MODE_VARIANTES = process.env.KOLIZEUM_MOCK_VARIANTS || "collection";
 
 function mkSpellDoc(id, name, description, variantId) {
   const doc = { id, name: { fr: name }, description: { fr: description } };
-  if (variantId != null && !SANS_VARIANTES) doc.spellVariantId = variantId;
+  if (variantId != null && MODE_VARIANTES === "pointeur") doc.spellVariantId = variantId;
   return doc;
 }
+
+/* La vraie collection rend une dizaine d'entrées par page quel que soit le
+   `$limit` demandé. On plafonne ici à UNE seule, pour éprouver la pagination
+   avec un jeu d'essai minuscule : c'est la même propriété — le serveur rend
+   moins que ce qu'on réclame — et le script doit s'appuyer sur le nombre de
+   lignes reçues, jamais sur la taille de page demandée. */
+const VARIANTS_PAR_PAGE = 1;
+
+/* L'ORDRE compte : le seul groupe Iop exploitable est en SECONDE page. Une
+   pagination qui s'arrêterait à la première le perdrait, et rien d'autre ne le
+   signalerait. */
+const SPELL_VARIANTS = [
+  // Un seul membre : ce n'est pas un groupe, et Puissance doit rester sans
+  // variante plutôt que de devenir un groupe d'un sort.
+  { id: 502, breedId: 8, spells: [102] },
+  { id: 501, breedId: 8, spells: [101, 107] },
+  // Références HYDRATÉES en objets complets, comme l'a fait `set.items` sur
+  // les panoplies : la lecture des identifiants doit tenir les deux formes.
+  { id: 503, breedId: 9, spells: [{ id: 103 }, { id: 108 }] },
+];
 
 const SPELL_DOCS = {
   101: mkSpellDoc(101, "Pression", "Frappe de près.", 501),
@@ -208,10 +230,24 @@ globalThis.fetch = async (input) => {
     const doc = SPELL_DOCS[Number(url.pathname.split("/")[2])];
     return { ok: Boolean(doc), status: doc ? 200 : 404, json: async () => doc || {} };
   }
+  else if (url.pathname === "/spell-variants") {
+    if (MODE_VARIANTES !== "collection") return { ok: false, status: 404, json: async () => ({}) };
+    const breedId = url.searchParams.get("breedId");
+    const lot = breedId === null
+      ? SPELL_VARIANTS
+      : SPELL_VARIANTS.filter((v) => v.breedId === Number(breedId));
+    // Plafond serveur : moins de lignes que le `$limit` réclamé.
+    const skip = Number(url.searchParams.get("$skip") || 0);
+    const body = {
+      total: lot.length, limit: VARIANTS_PAR_PAGE, skip,
+      data: lot.slice(skip, skip + VARIANTS_PAR_PAGE),
+    };
+    return { ok: true, status: 200, json: async () => body };
+  }
   else if (url.pathname === "/spells") {
     // Comme en production : aucun filtre par CLASSE ne fonctionne ici — la
     // requête aboutit et ne rend rien. Un filtre sur un champ du document,
-    // lui, fonctionne : c'est ainsi qu'on retrouve le jumeau d'un sort.
+    // lui, fonctionne : c'est ainsi que la piste de repli retrouve un jumeau.
     const variantId = url.searchParams.get("spellVariantId");
     if (variantId === null) {
       return { ok: true, status: 200, json: async () => ({ total: 0, limit: 50, skip: 0, data: [] }) };

@@ -306,13 +306,21 @@ async function identifiantsDeLaClasse(classe, opts, reporter, diagnostic) {
    --------------------------------------------------------------------------
    Chaque sort du grimoire possède une version alternative : le joueur retient
    l'une OU l'autre, jamais les deux. `breedSpellsId` ne liste que la première
-   de chaque paire — la seconde existe côté API, mais sous une liaison qui
-   n'est documentée nulle part.
+   de chaque paire.
 
-   Plutôt que de parier sur un nom de champ, on essaie trois pistes par ordre
-   de coût croissant et on s'arrête à la première productive. Si aucune ne
-   donne rien, la forme brute des documents est exposée : c'est elle qui porte
-   la réponse, et c'est exactement ce qui a débloqué les deux schémas
+   La liaison passe par une collection dédiée, interrogée CLASSE PAR CLASSE :
+
+     /spell-variants?breedId=<id>&$skip=0&lang=fr
+
+   C'est la forme qu'emploie le jeu, et la seule qui rattache un groupe à sa
+   classe sans passer par un jumeau déjà connu. Elle rend une dizaine d'entrées
+   par page quel que soit le `$limit` demandé — la pagination s'appuie donc sur
+   le nombre de lignes reçues, jamais sur la taille de page réclamée.
+
+   Deux pistes de repli suivent, au cas où le schéma bougerait : un champ de
+   variante sur le document de sort, sous forme de liste ou de pointeur. Si
+   aucune n'aboutit, la forme brute des documents est exposée — c'est elle qui
+   porte la réponse, et c'est exactement ce qui a débloqué les schémas
    précédents (bonus de panoplie, puis liaison classe → sorts).
    ========================================================================== */
 
@@ -346,19 +354,19 @@ function clesVariante(doc) {
  * qu'on extrayait déjà : une extraction plus riche ne doit pas changer le sort
  * proposé par défaut.
  */
-function ajouterGroupe(groupes, groupId, membres, connus) {
+function ajouterGroupe(groupes, groupId, membres, connus, breedId) {
   const uniques = [...new Set(membres.filter(Number.isFinite))];
   if (uniques.length < 2 || uniques.length > VARIANT_GROUP_MAX) return false;
   const ordonnes = uniques
     .map((id, rang) => ({ id, rang, connu: connus.has(id) ? 0 : 1 }))
     .sort((a, b) => a.connu - b.connu || a.rang - b.rang)
     .map((e) => e.id);
-  for (const id of ordonnes) groupes.set(id, { groupId, membres: ordonnes });
+  for (const id of ordonnes) groupes.set(id, { groupId, membres: ordonnes, breedId: breedId ?? null });
   return true;
 }
 
 /**
- * Piste 1 — le document de sort liste lui-même ses variantes.
+ * Piste 2 — le document de sort liste lui-même ses variantes.
  * Gratuite : les documents sont déjà en mémoire.
  */
 function pisteListeSurSort(ctx) {
@@ -383,7 +391,7 @@ function pisteListeSurSort(ctx) {
 }
 
 /**
- * Piste 2 — le document de sort pointe un groupe par un simple nombre.
+ * Piste 3 — le document de sort pointe un groupe par un simple nombre.
  *
  * Le jumeau ne figurant pas dans `breedSpellsId`, on le retrouve en demandant à
  * l'API tous les sorts portant la même valeur. Un filtre simple est accepté —
@@ -448,37 +456,82 @@ async function pistePointeurSurSort(ctx) {
   };
 }
 
-/** Piste 3 — une collection dédiée regroupe les variantes. */
+/**
+ * Lit la collection des variantes classe par classe, comme le fait le jeu.
+ *
+ * Un filtre inconnu est parfois IGNORÉ plutôt que refusé : on recevrait alors
+ * les mêmes lignes pour chaque classe et on leur attribuerait une classe au
+ * hasard. Le doublon d'identifiant entre deux classes trahit ce cas, et on
+ * bascule alors sur une lecture non filtrée, où la classe se déduit du jumeau.
+ */
+async function lireParClasse(resource, ctx) {
+  const lignes = [];
+  const vus = new Map();
+  for (const classe of ctx.voulues) {
+    const lot = await fetchCollection(resource, { breedId: String(classe.id) }, ctx.opts, ctx.reporter, true);
+    for (const row of lot) {
+      if (row && row.id != null && vus.has(row.id) && vus.get(row.id) !== classe.id) {
+        ctx.reporter.debug(`/${resource} : le filtre breedId est ignoré (groupe ${row.id} rendu pour deux classes)`);
+        return null;
+      }
+      if (row && row.id != null) vus.set(row.id, classe.id);
+      lignes.push({ row, breedId: classe.id });
+    }
+    if (ctx.opts.delay) await sleep(ctx.opts.delay);
+  }
+  return lignes;
+}
+
+/** Piste 1 — une collection dédiée regroupe les variantes. */
 async function pisteCollection(ctx) {
   const essais = [];
   for (const resource of VARIANT_COLLECTIONS) {
-    let rows;
+    let lignes = null;
+    let filtre = "?breedId=…";
     try {
-      rows = await fetchCollection(resource, {}, ctx.opts, ctx.reporter, true);
+      lignes = await lireParClasse(resource, ctx);
     } catch (err) {
-      essais.push(`/${resource} absente`);
+      // Collection absente ou filtre refusé : inutile d'insister sur ce nom.
+      essais.push(`/${resource} : ${err.message}`);
       continue;
     }
-    if (!rows.length) { essais.push(`/${resource} vide`); continue; }
+
+    if (!lignes || !lignes.length) {
+      // Filtre ignoré, ou classe sans groupe : relire sans filtre. La
+      // collection couvre alors les dix-huit classes, d'où le tri par jumeau.
+      filtre = "sans filtre";
+      try {
+        const lot = await fetchCollection(resource, {}, ctx.opts, ctx.reporter, true);
+        lignes = lot.map((row) => ({ row, breedId: null }));
+      } catch (err) {
+        essais.push(`/${resource} sans filtre : ${err.message}`);
+        continue;
+      }
+    }
+    if (!lignes.length) { essais.push(`/${resource} vide`); continue; }
 
     const groupes = new Map();
-    for (const row of rows) {
+    let champ = null;
+    for (const { row, breedId } of lignes) {
       const liste = firstArray(row, VARIANT_MEMBER_FIELDS);
       if (!liste) continue;
       const membres = idsDeListe(liste.valeur);
-      if (!membres.some((id) => ctx.connus.has(id))) continue;
-      ajouterGroupe(groupes, row.id ?? membres[0], membres, ctx.connus);
+      // Sans filtre de classe, seuls les groupes touchant un sort connu nous
+      // concernent — les autres appartiennent aux classes non demandées.
+      if (breedId == null && !membres.some((id) => ctx.connus.has(id))) continue;
+      if (ajouterGroupe(groupes, row.id ?? membres[0], membres, ctx.connus, breedId)) champ = liste.nom;
     }
     if (groupes.size) {
       return {
-        source: `/${resource}`,
+        source: `/${resource}${filtre === "sans filtre" ? "" : "?breedId=…"} (champ « ${champ} »)`,
         groupes,
-        note: `collection dédiée : ${groupes.size} sorts groupés via /${resource}`,
+        note: `collection dédiée : ${groupes.size} sorts groupés via /${resource} ${filtre}`,
       };
     }
     // Présente mais inexploitable : montrer sa forme plutôt que de la taire.
-    essais.push(`/${resource} présente (${rows.length} entrées) mais aucun groupe ne contient un sort connu`
-      + ` — champs : ${Object.keys(rows[0]).join(", ")}`);
+    const exemple = lignes[0].row || {};
+    essais.push(`/${resource} ${filtre} : ${lignes.length} entrées, aucun groupe exploitable`
+      + ` — champs : ${Object.keys(exemple).join(", ")}`);
   }
   return { source: null, groupes: new Map(), note: `collection dédiée : ${essais.join(" ; ")}` };
 }
@@ -489,7 +542,9 @@ async function pisteCollection(ctx) {
  */
 async function decouvrirVariantes(ctx) {
   const tentatives = [];
-  for (const piste of [pisteListeSurSort, pistePointeurSurSort, pisteCollection]) {
+  // La collection dédiée d'abord : c'est la liaison confirmée. Les deux autres
+  // ne servent que si le schéma bouge.
+  for (const piste of [pisteCollection, pisteListeSurSort, pistePointeurSurSort]) {
     const r = await piste(ctx);
     tentatives.push(r.note);
     if (r.groupes.size) return { ...r, tentatives };
@@ -712,11 +767,14 @@ async function main() {
   const nouveaux = [];
   for (const [id, groupe] of variantes.groupes) {
     if (classeParSort.has(id)) continue;
-    // Un membre découvert hérite de la classe de son jumeau : c'est la seule
-    // information de classe dont on dispose pour lui.
+    // La classe vient de la requête quand le groupe a été lu par classe ; sinon
+    // le jumeau est la seule information dont on dispose.
     const jumeau = groupe.membres.find((m) => classeParSort.has(m));
-    if (!jumeau) continue;
-    classeParSort.set(id, classeParSort.get(jumeau));
+    const classe = groupe.breedId != null
+      ? voulues.find((c) => c.id === groupe.breedId)
+      : (jumeau ? classeParSort.get(jumeau) : null);
+    if (!classe) continue;
+    classeParSort.set(id, classe);
     nouveaux.push(id);
   }
   for (const id of nouveaux) {

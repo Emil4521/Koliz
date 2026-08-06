@@ -107,7 +107,32 @@ function extraire(mock, args, env) {
   assert.strictEqual(sombre.class, "cra", "la variante Crâ reste chez les Crâ");
 
   assert.strictEqual(payload.meta.counts.variantGroups, 2, "deux groupes de variantes");
-  assert.ok(/spellVariantId/.test(payload.meta.variants.source), "la liaison trouvée est nommée");
+  assert.ok(/spell-variants\?breedId/.test(payload.meta.variants.source),
+    "la liaison confirmée est celle employée");
+
+  // La collection rend moins de lignes que le `$limit` réclamé. Le seul groupe
+  // Iop exploitable étant placé en SECONDE page, sa présence prouve que la
+  // pagination s'appuie sur le nombre de lignes reçues et non sur la taille de
+  // page demandée — sans quoi la moitié du grimoire manquerait en silence.
+  assert.ok(jumeau, "le groupe de la seconde page a bien été lu");
+
+  fs.rmSync(outDir, { recursive: true, force: true });
+}
+
+/* --- Repli : pas de collection, un pointeur sur le document de sort ---------
+   Si le schéma bouge, la piste du champ numérique doit prendre le relais et
+   retrouver le jumeau par un filtre simple sur /spells. */
+{
+  const { run, payload, rapport, outDir } =
+    extraire("mock-api.js", null, { KOLIZEUM_MOCK_VARIANTS: "pointeur" });
+  assert.strictEqual(run.status, 0, `le repli doit réussir :\n${rapport}`);
+
+  assert.strictEqual(payload.spells.length, 6, "les jumeaux sont retrouvés sans la collection");
+  assert.ok(/spellVariantId/.test(payload.meta.variants.source), "la piste de repli est nommée");
+  const jumeau = payload.spells.find((s) => s.name === "Pression Éclatée");
+  assert.strictEqual(jumeau.class, "iop", "la classe vient alors du jumeau");
+  assert.strictEqual(jumeau.variantRank, 1, "le sort listé par la classe reste devant");
+
   fs.rmSync(outDir, { recursive: true, force: true });
 }
 
@@ -117,7 +142,7 @@ function extraire(mock, args, env) {
    documents bruts, puisque c'est là que se trouve la liaison. */
 {
   const { run, payload, rapport, outDir } =
-    extraire("mock-api.js", null, { KOLIZEUM_MOCK_NO_VARIANTS: "1" });
+    extraire("mock-api.js", null, { KOLIZEUM_MOCK_VARIANTS: "aucune" });
   assert.strictEqual(run.status, 0, `l'absence de variante n'est pas fatale :\n${rapport}`);
 
   assert.strictEqual(payload.spells.length, 4, "seuls les sorts listés par la classe");
