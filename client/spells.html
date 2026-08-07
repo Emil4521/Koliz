@@ -91,6 +91,16 @@
   .spell .fx { margin: 3px 0 0; padding: 0; list-style: none; font: 11px ui-monospace, monospace; }
   .spell .fx li { color: var(--muted); }
   .spell .fx li.unk { color: var(--warn); }
+  .spell .fx li.dmg { color: #ffc9c9; }
+
+  /* Caractéristiques effectives : base + buffs en cours. */
+  .stats {
+    margin-top: 6px; display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 2px 8px; font: 11px ui-monospace, monospace; color: var(--muted);
+  }
+  .stats span { display: flex; justify-content: space-between; gap: 5px; }
+  .stats b { color: var(--text); font-weight: 500; }
+  .stats span.mod b { color: var(--exo); }
 
   /* Bascule de variante : un sort OU son alternative, jamais les deux. */
   .spell .var {
@@ -382,6 +392,25 @@ function renderEntities() {
     pp.appendChild(el("span", null, "PM ")).appendChild(el("b", null, String(e.pm)));
     body.appendChild(pp);
 
+    // Caractéristiques réellement en vigueur : base + buffs. Sans cet
+    // affichage, un « −3 PM » ou un « +100 Force » ne se voyait nulle part.
+    const eff = S.effectiveStats(e);
+    const grille = el("div", "stats");
+    for (const [cle, nom] of [
+      ["force", "For"], ["intelligence", "Int"], ["chance", "Cha"],
+      ["agilite", "Agi"], ["puissance", "Pui"], ["domFixe", "Dom"],
+    ]) {
+      const base = e.stats[cle] || 0;
+      const valeur = eff[cle] || 0;
+      const ligne = el("span", valeur !== base ? "mod" : null);
+      ligne.appendChild(el("i", null, nom)).style.fontStyle = "normal";
+      ligne.appendChild(el("b", null, valeur !== base
+        ? `${valeur} (${valeur - base >= 0 ? "+" : ""}${valeur - base})`
+        : String(valeur)));
+      grille.appendChild(ligne);
+    }
+    body.appendChild(grille);
+
     if (e.buffs.length) {
       const b = el("div", "buffs");
       b.textContent = e.buffs
@@ -453,10 +482,25 @@ function renderSpells() {
     carte.appendChild(t);
 
     const ul = el("ul", "fx");
+    const statsLanceur = S.effectiveStats(e);
+    const adverse = state.entities.find((x) => x.id !== e.id);
+    const statsCible = adverse ? S.effectiveStats(adverse) : {};
+
     for (const fx of niveau.effects) {
       const li = el("li", fx.kind ? null : "unk");
       const bornes = fx.min === fx.max ? `${fx.min}` : `${fx.min}–${fx.max}`;
-      li.textContent = `${bornes} ${fx.label}` + (fx.kind ? "" : " ⚠ non appliqué");
+
+      if (fx.kind === "damage") {
+        // Le jet brut n'est pas ce que la cible encaisse : on affiche les
+        // deux, jet puis dégâts réels une fois la formule appliquée.
+        const reel = S.damageRange(fx, statsLanceur, statsCible);
+        const vrai = reel.min === reel.max ? `${reel.min}` : `${reel.min}–${reel.max}`;
+        li.textContent = `${bornes} → ${vrai} ${fx.label}`;
+        li.title = reel.detail;
+        li.className = "dmg";
+      } else {
+        li.textContent = `${bornes} ${fx.label}` + (fx.kind ? "" : " ⚠ non appliqué");
+      }
       ul.appendChild(li);
     }
     carte.appendChild(ul);

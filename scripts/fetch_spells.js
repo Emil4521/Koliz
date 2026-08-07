@@ -22,7 +22,7 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  normalize, pickText, labelFromTemplate, statKeyForLabel, isMetadataLabel,
+  normalize, pickText, labelFromTemplate, statKeyForLabel, isMetadataLabel, effectSign,
 } = require("./fetch_items.js");
 
 const API = "https://api.dofusdb.fr";
@@ -647,7 +647,16 @@ function transformEffect(raw, effectMap, reporter, inconnues, nonClasses) {
     effet.element = connu.element || null;
     if (connu.lifesteal) effet.lifesteal = true;
   }
-  if (kind === "boost") effet.statKey = def.statKey;
+  if (kind === "boost") {
+    effet.statKey = def.statKey;
+    // Le gabarit porte le sens ; le libellé, non. Sans ce report, Couperet
+    // « -3 PM » devient « +3 PM » : un malus offert à l'adversaire.
+    if (def.sign < 0) {
+      effet.min = -effet.min;
+      effet.max = -effet.max;
+      if (effet.min > effet.max) [effet.min, effet.max] = [effet.max, effet.min];
+    }
+  }
   return effet;
 }
 
@@ -725,10 +734,14 @@ async function main() {
   const effectMap = {};
   for (const e of rawEffects) {
     if (e.id == null) continue;
-    const label = labelFromTemplate(pickText(e.description, opts.lang));
+    const gabarit = pickText(e.description, opts.lang);
+    const label = labelFromTemplate(gabarit);
     effectMap[e.id] = {
       id: e.id, label: label || `effet ${e.id}`,
       statKey: statKeyForLabel(label),
+      // Un effet qui RETIRE se dépouille en le même libellé que celui qui
+      // donne : le sens ne survit que s'il est relevé sur le gabarit.
+      sign: effectSign(gabarit),
     };
   }
 

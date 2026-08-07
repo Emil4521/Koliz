@@ -49,6 +49,10 @@ const EFFECTS = [
   { id: 81, description: { fr: "#1{{~1~2 à }}#2 soins" } },
   { id: 1040, description: { fr: "#1{{~1~2 à }}#2 Bouclier" } },
   { id: 412, description: { fr: "#1{{~1~2 à }}#2 Retrait PM" } },
+  // Pendant NÉGATIF du 128 ci-dessus : les deux se dépouillent en « PM », seul
+  // le MOINS initial du gabarit distingue le malus du bonus. C'est ce qui
+  // faisait offrir 3 PM à l'adversaire là où Couperet doit lui en retirer 3.
+  { id: 127, description: { fr: "-#1{{~1~2 à -}}#2 PM" } },
 ];
 
 function mkItem(id, typeId, level, name, effects, extra = {}) {
@@ -187,7 +191,7 @@ function mkLevel(spellId, grade, apCost, minRange, range, effects, extra = {}) {
 const SPELL_LEVELS = [
   mkLevel(101, 1, 3, 1, 1, [[97, 2, 15]]),
   mkLevel(101, 6, 4, 1, 1, [[97, 16, 20]]),
-  mkLevel(102, 6, 2, 0, 0, [[118, 40, 40, 3, "C"]]),   // buff sur SOI
+  mkLevel(102, 6, 2, 0, 0, [[118, 40, 40, 3, "C"], [127, 3, 3, 1]]),   // buff sur SOI + malus PM
   mkLevel(103, 6, 4, 1, 8, [[98, 21, 25]], {
     rangeCanBeBoosted: true,
     zoneDescr: { shape: 67, param1: 2, param2: 0 },   // 'C' : disque de 2

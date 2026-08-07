@@ -40,7 +40,7 @@
    * l'écran, et qui ont coûté trois allers-retours. À bomber à chaque
    * changement de comportement du module.
    */
-  const MODULE_VERSION = "0.3.2";
+  const MODULE_VERSION = "0.4.0";
 
   const ELEMENT_STATS = {
     terre:  { carac: "force",        domFixe: "domTerre",  resPct: "resPctTerre",  resFixe: "resFixeTerre" },
@@ -322,15 +322,36 @@
     const apresPct = Math.floor(bruts * (100 - resPct) / 100);
     const finaux = Math.max(0, apresPct - resFixe);
 
+    // Chaque terme est nommé : le journal doit pouvoir se comparer au jeu
+    // ligne à ligne, et un écart doit désigner le terme fautif, pas un total.
+    const termes = [`${casterStats[map.carac] || 0} ${map.carac}`];
+    if (casterStats.puissance) termes.push(`${casterStats.puissance} puissance`);
+    if (pourcent) termes.push(`${pourcent}% dommages`);
+
     return {
       element, base, carac, pourcent, fixes,
       bruts, resPct, resFixe, finaux,
-      // Le détail sert au journal de combat, indispensable pour comparer au jeu.
-      detail: `${base} × (1 + ${carac + pourcent}%) = ${multiplie}`
+      detail: `${base} × (100 + ${termes.join(" + ")})/100 = ${multiplie}`
             + (fixes ? ` + ${fixes} fixes` : "")
             + (opts.critical && casterStats.domCrit ? ` + ${casterStats.domCrit} crit.` : "")
             + ` → ${bruts}, puis −${resPct}% ${resFixe ? `et −${resFixe} fixe ` : ""}→ ${finaux}`,
     };
+  }
+
+  /**
+   * Fourchette de dégâts RÉELLEMENT infligés, bornes du jet passées par la
+   * formule complète.
+   *
+   * « 28–32 dommages Feu » sur une fiche de sort n'est pas ce que la cible
+   * encaisse : c'est le jet de base, avant caractéristique, puissance,
+   * dommages fixes et résistances. Afficher l'un pour l'autre donne une
+   * lecture fausse du grimoire.
+   */
+  function damageRange(effect, casterStats, targetStats, options) {
+    const opts = options || {};
+    const bas = computeDamage(effect, casterStats, targetStats, { ...opts, roll: effect.min });
+    const haut = computeDamage(effect, casterStats, targetStats, { ...opts, roll: effect.max });
+    return { min: bas.finaux, max: haut.finaux, element: bas.element, detail: haut.detail };
   }
 
   /* ========================================================================
@@ -535,9 +556,24 @@
               statKey: effet.statKey, value: jet,
               duration: effet.duration || 1, label: effet.label, source: spell.name,
             });
+
+            // Les PA et les PM sont des RÉSERVES, pas des caractéristiques :
+            // un retrait ampute le tour en cours, il n'attend pas la
+            // régénération suivante. Sans cela, « −3 PM » sur l'adversaire ne
+            // se voyait nulle part avant son tour d'après.
+            let immediat = "";
+            if (effet.statKey === "pa" || effet.statKey === "pm") {
+              const avant = cible[effet.statKey];
+              cible[effet.statKey] = Math.max(0, avant + jet);
+              const delta = cible[effet.statKey] - avant;
+              immediat = ` — ${effet.statKey.toUpperCase()} ${avant} → ${cible[effet.statKey]}`
+                + (delta !== jet ? " (plancher à 0)" : "");
+            }
+
             journal.push({
               type: "boost",
-              texte: `${cible.name} : ${effet.label} ${jet >= 0 ? "+" : ""}${jet} pendant ${effet.duration || 1} tour(s)`,
+              texte: `${cible.name} : ${effet.label} ${jet >= 0 ? "+" : ""}${jet}`
+                   + ` pendant ${effet.duration || 1} tour(s)${immediat}`,
               cible: cible.id,
             });
             break;
@@ -632,7 +668,7 @@
     indexData, levelFor,
     variantGroups, defaultSelection, activeSpells, cycleVariant,
     zoneCells, canCast, rangeCells,
-    computeDamage, makeEntity, effectiveStats, applyDamage,
+    computeDamage, damageRange, makeEntity, effectiveStats, applyDamage,
     pushDirection, forcedMove,
     castSpell, tickBuffs,
   };

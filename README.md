@@ -113,9 +113,15 @@ de [nodejs.org](https://nodejs.org).
 - Lancer résolu : consommation des PA, coup critique, zone, effets appliqués.
 - **Poussée et attirance résolues** sur la grille : trajet case par case,
   arrêt au premier obstacle, cases bloquées décomptées.
-- **Journal de combat détaillé** — chaque calcul de dégâts est affiché en clair
-  (`18 × (1 + 100%) = 36 → 36, puis −0% → 36`), pour pouvoir comparer au jeu
-  ligne à ligne plutôt que de constater un total qui ne tombe pas juste.
+- **Dégâts réels sur la fiche** : `28–32 → 56–64 dommages Feu`. Le premier
+  couple est le jet du sort, le second ce que la cible encaisse réellement une
+  fois la formule appliquée. N'afficher que le jet donne une lecture fausse du
+  grimoire.
+- **Caractéristiques effectives** sous chaque combattant : base + buffs en
+  cours, les valeurs modifiées ressortant en couleur.
+- **Journal de combat détaillé** — chaque terme est nommé
+  (`30 × (100 + 100 intelligence)/100 = 60 → 60, puis −0% → 60`), pour qu'un
+  écart avec le jeu désigne le terme fautif et non un total.
 - Fin de tour : passage de main, régénération des PA/PM, expiration des buffs.
 
 ### Formule de dégâts
@@ -152,6 +158,25 @@ familles indépendantes se recoupent dans le même ordre d'éléments :
 | 1040 | Bouclier |
 | 410 – 413 | Retrait PA / PM |
 | 5, 6 | Poussée / attirance |
+
+### Le sens d'un effet ne se lit pas sur son libellé
+
+Ankama encode « donne » et « retire » par un **moins placé avant le premier
+paramètre du gabarit**, pas par un identifiant ni par le champ `operator` — qui
+vaut `null` sur tous ces effets :
+
+```
+128   "#1{{~1~2 à }}#2 PM"      donne des PM
+127   "-#1{{~1~2 à -}}#2 PM"    en retire
+```
+
+Les deux se dépouillent en « PM ». En ne lisant que le libellé, Couperet — qui
+retire 3 PM à sa cible — lui en offrait 3. La règle vaut pour les 86 gabarits
+négatifs de la table, chacun apparié à un positif de même statistique (101/111
+pour les PA, 116/117 pour la portée, 152–157 pour les caractéristiques).
+
+**Précipitation** est le cas qui interdit toute autre approche : elle porte
+`+5 PA` (effet 111) *et* `−3 PA` (effet 168), deux effets au libellé identique.
 
 Le libellé attendu est conservé pour recoupement : si l'API répond autre chose
 à l'un de ces identifiants, l'extraction le signale et **suspend** la

@@ -227,6 +227,27 @@ function pickText(value, lang) {
 }
 
 /**
+ * Sens d'un effet, lu sur son gabarit : +1 s'il donne, −1 s'il retire.
+ *
+ * Ankama encode le sens par un MOINS placé juste avant le premier paramètre :
+ *
+ *     128  "#1{{~1~2 à }}#2 PM"      → donne des PM
+ *     127  "-#1{{~1~2 à -}}#2 PM"    → en retire
+ *
+ * Les deux se dépouillent en « PM », si bien qu'un libellé seul ne permet pas
+ * de trancher. C'est ainsi que Couperet, qui retire 3 PM à sa cible, se
+ * retrouvait à lui en offrir 3. La règle vaut pour les 86 gabarits négatifs de
+ * la table, chacun apparié à un positif de même statistique (101/111 pour les
+ * PA, 116/117 pour la portée, 152..157 pour les caractéristiques).
+ *
+ * Le champ `operator` de l'API ne sert à rien ici : il vaut `null` sur tous
+ * ces effets.
+ */
+function effectSign(tpl) {
+  return /^\s*-\s*#\d/.test(String(tpl || "")) ? -1 : 1;
+}
+
+/**
  * Extrait un libellé lisible d'un gabarit de description Ankama.
  * Exemple : "+#1{~1~2 à }#2 Force" → "Force".
  *
@@ -836,7 +857,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-  normalize, pickText, labelFromTemplate, normalizeEffect,
+  normalize, pickText, labelFromTemplate, effectSign, normalizeEffect,
   statKeyForLabel, labelsMatch, isMetadataLabel,
   slotForType, transformItem, transformSet, buildEffectMap,
   SLOT_CAPACITY, SLOT_BY_TYPE, STAT_BY_LABEL, EFFECT_CROSSCHECK,

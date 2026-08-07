@@ -74,6 +74,14 @@ function extraire(mock, args, env) {
   assert.strictEqual(boost.statKey, "force", "statistique du boost");
   assert.strictEqual(boost.duration, 3, "durée du boost");
 
+  // Un effet qui RETIRE sort négatif. Son libellé est le même que celui qui
+  // donne — seul le moins initial du gabarit les sépare — d'où un malus
+  // silencieusement transformé en bonus tant qu'on ne lisait que le libellé.
+  const malus = puissance.levels[0].effects[1];
+  assert.strictEqual(malus.kind, "boost", "le malus reste un boost");
+  assert.strictEqual(malus.statKey, "pm", "même statistique que le bonus");
+  assert.deepStrictEqual([malus.min, malus.max], [-3, -3], "valeurs négatives");
+
   // Zones et effets non reconnus : signalés, jamais devinés.
   const exotique = payload.spells.find((s) => s.name === "Sort Exotique");
   const niveau = exotique.levels[0];

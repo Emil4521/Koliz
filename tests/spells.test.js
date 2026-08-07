@@ -253,6 +253,67 @@ const carte = () => G.makeMap(grid);
   assert.strictEqual(S.levelFor(spell, 200).level, 6, "niveau 200 : dernier palier");
 }
 
+/* --- Malus de PA/PM : une réserve, pas une caractéristique ------------------
+   Couperet retire 3 PM à sa cible. Ces points doivent partir TOUT DE SUITE :
+   un retrait qui n'ampute que la régénération du tour suivant laisse
+   l'adversaire jouer son tour entier comme si de rien n'était. */
+{
+  const map = carte();
+  const lanceur = S.makeEntity({ id: "l", name: "Iop", cellId: at(10, 6), pa: 6, stats: {} });
+  const cible = S.makeEntity({ id: "c", name: "Cra", cellId: at(11, 6), pm: 3, stats: { pm: 3 } });
+
+  const sort = {
+    id: 1, name: "Couperet",
+    levels: [{
+      apCost: 3, ranges: [{ min: 1, max: 4 }], lineOfSight: true,
+      zones: [{ type: "point", size: 0 }], criticalHitProbability: 0,
+      effects: [{ effectId: 1080, kind: "boost", statKey: "pm", label: "PM", min: -3, max: -3, duration: 1 }],
+      criticalEffects: [],
+    }],
+  };
+
+  const r = S.castSpell({
+    grid, map, caster: lanceur, spell: sort, level: sort.levels[0],
+    targetCell: cible.cellId, entities: [lanceur, cible], rng: () => 0,
+  });
+  assert.ok(r.ok, "le sort passe");
+  assert.strictEqual(cible.pm, 0, "les 3 PM partent immédiatement");
+  assert.strictEqual(S.effectiveStats(cible).pm, 0, "la statistique suit aussi");
+  assert.ok(r.journal.some((l) => /PM 3 → 0/.test(l.texte)), "le journal montre la réserve");
+
+  // Jamais sous zéro, et le plancher est signalé plutôt que silencieux.
+  const sec = S.makeEntity({ id: "s", name: "Sec", cellId: at(12, 6), pm: 1, stats: { pm: 1 } });
+  const r2 = S.castSpell({
+    grid, map, caster: lanceur, spell: sort, level: sort.levels[0],
+    targetCell: sec.cellId, entities: [lanceur, sec], rng: () => 0,
+  });
+  assert.strictEqual(sec.pm, 0, "pas de PM négatifs");
+  assert.ok(r2.journal.some((l) => /plancher/.test(l.texte)), "le plancher est dit");
+}
+
+/* --- Dégâts affichés : le jet n'est pas ce que la cible encaisse ------------ */
+{
+  // « 28–32 dommages Feu » est le jet de base. Avec 100 en intelligence, la
+  // cible en prend le double ; c'est ce chiffre-là qui doit s'afficher.
+  const effet = { kind: "damage", element: "feu", min: 28, max: 32 };
+  const plage = S.damageRange(effet, { intelligence: 100 }, {});
+  assert.deepStrictEqual([plage.min, plage.max], [56, 64], "jet doublé par la caractéristique");
+
+  // Les résistances de la cible entrent dans le compte affiché.
+  const resiste = S.damageRange(effet, { intelligence: 100 }, { resPctFeu: 50, resFixeFeu: 6 });
+  assert.deepStrictEqual([resiste.min, resiste.max], [22, 26], "−50 % puis −6 fixes");
+
+  // Sans aucune statistique, l'affiché redevient le jet brut.
+  const nu = S.damageRange(effet, {}, {});
+  assert.deepStrictEqual([nu.min, nu.max], [28, 32], "sans stats, le jet tel quel");
+
+  // Le détail nomme chaque terme : un écart avec le jeu doit désigner le
+  // terme fautif, pas un total.
+  const d = S.computeDamage(effet, { intelligence: 100, puissance: 20 }, {}, { roll: 28 });
+  assert.ok(/100 intelligence/.test(d.detail), "la caractéristique est nommée");
+  assert.ok(/20 puissance/.test(d.detail), "la puissance est nommée");
+}
+
 /* --- Déplacements forcés ----------------------------------------------------
    La grille en diamant n'est pas un rectangle : à y = 6, x ne va que de 6 à 15.
    Les cases ci-dessous sont toutes vérifiées sur la grille de test. */

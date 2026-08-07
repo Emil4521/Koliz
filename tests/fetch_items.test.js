@@ -174,7 +174,7 @@ const byId = new Map(payload.items.map((i) => [i.id, i]));
   assert.strictEqual(payload.items.length, 12, "objets conservés");
   // La fausse API est partagée avec les tests de sorts : sa table d'effets
   // couvre les deux domaines.
-  assert.strictEqual(payload.meta.counts.effects, 20, "effets récupérés");
+  assert.strictEqual(payload.meta.counts.effects, 21, "effets récupérés");
   assert.strictEqual(payload.sets.length, 1, "panoplies conservées");
 }
 
