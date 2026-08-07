@@ -120,10 +120,22 @@ const carte = () => G.makeMap(grid);
     S.computeDamage({ element: "neutre", min: 10, max: 10 }, { force: 100 }, {}, { roll: 10 }).finaux, 20,
     "le neutre est porté par la force");
 
-  // Puissance et % dommages s'ajoutent au multiplicateur.
+  // La puissance rejoint la caractéristique dans la parenthèse.
+  assert.strictEqual(
+    S.computeDamage({ element: "terre", min: 10, max: 10 }, { force: 50, puissance: 30 }, {}, { roll: 10 }).finaux,
+    18, "10 × (100 + 50 + 30)/100 = 18");
+
+  // Le « % Dommages », lui, multiplie le TOTAL : il n'entre PAS dans cette
+  // parenthèse. La différence est loin d'être cosmétique — mêlé à la
+  // caractéristique il donnait 20, appliqué au total il donne 21.
   assert.strictEqual(
     S.computeDamage({ element: "terre", min: 10, max: 10 }, { force: 50, puissance: 30, domPct: 20 }, {}, { roll: 10 }).finaux,
-    20, "puissance et % dommages entrent dans le multiplicateur");
+    21, "18 × (1 + 20%) = 21");
+
+  // Il s'applique bien APRÈS les dommages fixes, donc les multiplie aussi.
+  assert.strictEqual(
+    S.computeDamage({ element: "terre", min: 10, max: 10 }, { domFixe: 10, domPct: 50 }, {}, { roll: 10 }).finaux,
+    30, "(10 + 10) × (1 + 50%) = 30");
 
   // Les dommages fixes s'ajoutent après le multiplicateur.
   const fixes = S.computeDamage({ element: "terre", min: 10, max: 10 },
@@ -289,6 +301,34 @@ const carte = () => G.makeMap(grid);
   });
   assert.strictEqual(sec.pm, 0, "pas de PM négatifs");
   assert.ok(r2.journal.some((l) => /plancher/.test(l.texte)), "le plancher est dit");
+}
+
+/* --- Durée d'un effet : en tours DE JEU, pas en tours du porteur ------------
+   « −3 PM pendant 1 tour » doit peser sur le tour que la cible s'apprête à
+   jouer. Compter la durée sur le tour du lanceur, ou régénérer les points
+   depuis les statistiques de base, annule le malus au moment précis où il
+   devrait mordre — c'est ce que faisait le banc d'essai. */
+{
+  const cible = S.makeEntity({ id: "c", name: "Cra", cellId: at(10, 6), pm: 3, stats: { pa: 6, pm: 3 } });
+  cible.buffs.push({ statKey: "pm", value: -3, duration: 1, label: "PM" });
+  cible.pm = 0;
+
+  // Début du tour de la cible : la régénération part des caractéristiques
+  // EFFECTIVES. Repartir de `stats.pm` lui rendrait ses 3 PM.
+  const regen = (e) => {
+    const eff = S.effectiveStats(e);
+    e.pa = Math.max(0, eff.pa != null ? eff.pa : 6);
+    e.pm = Math.max(0, eff.pm != null ? eff.pm : 3);
+  };
+  regen(cible);
+  assert.strictEqual(cible.pm, 0, "la cible joue bien son tour amputée");
+  assert.strictEqual(cible.pa, 6, "les PA, eux, sont intacts");
+
+  // Le tour de jeu s'achève : l'effet expire, et seulement là.
+  const expires = S.tickBuffs(cible);
+  assert.strictEqual(expires.length, 1, "l'effet expire au bout d'un tour de jeu");
+  regen(cible);
+  assert.strictEqual(cible.pm, 3, "le tour suivant est de nouveau complet");
 }
 
 /* --- Dégâts affichés : le jet n'est pas ce que la cible encaisse ------------ */

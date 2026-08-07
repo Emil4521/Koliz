@@ -40,7 +40,7 @@
    * l'écran, et qui ont coûté trois allers-retours. À bomber à chaque
    * changement de comportement du module.
    */
-  const MODULE_VERSION = "0.4.0";
+  const MODULE_VERSION = "0.4.1";
 
   const ELEMENT_STATS = {
     terre:  { carac: "force",        domFixe: "domTerre",  resPct: "resPctTerre",  resFixe: "resFixeTerre" },
@@ -313,28 +313,42 @@
     const pourcent = casterStats.domPct || 0;
     const fixes = (casterStats[map.domFixe] || 0) + (casterStats.domFixe || 0);
 
-    const multiplie = Math.floor(base * (100 + carac + pourcent) / 100);
+    // 1. La caractéristique de l'élément et la puissance multiplient le jet.
+    const multiplie = Math.floor(base * (100 + carac) / 100);
+
+    // 2. Les dommages fixes s'ajoutent ensuite : ceux de l'élément et les
+    //    génériques. Ils ne sont pas multipliés par la caractéristique.
     let bruts = multiplie + fixes;
     if (opts.critical) bruts += casterStats.domCrit || 0;
 
+    // 3. Le « % Dommages » multiplie le TOTAL, il n'entre pas dans la
+    //    parenthèse de la caractéristique. Deux emplacements très différents :
+    //    à 100 en intelligence et 20 % dommages, 28 de base donnent 67 ici
+    //    contre 61 si le pourcentage rejoignait la caractéristique.
+    const totalise = Math.floor(bruts * (100 + pourcent) / 100);
+
+    // 4. Les résistances de la cible, pourcentage puis fixe.
     const resPct = targetStats[map.resPct] || 0;
     const resFixe = targetStats[map.resFixe] || 0;
-    const apresPct = Math.floor(bruts * (100 - resPct) / 100);
+    const apresPct = Math.floor(totalise * (100 - resPct) / 100);
     const finaux = Math.max(0, apresPct - resFixe);
 
     // Chaque terme est nommé : le journal doit pouvoir se comparer au jeu
     // ligne à ligne, et un écart doit désigner le terme fautif, pas un total.
     const termes = [`${casterStats[map.carac] || 0} ${map.carac}`];
     if (casterStats.puissance) termes.push(`${casterStats.puissance} puissance`);
-    if (pourcent) termes.push(`${pourcent}% dommages`);
 
     return {
       element, base, carac, pourcent, fixes,
-      bruts, resPct, resFixe, finaux,
+      bruts, totalise, resPct, resFixe, finaux,
+      // Un terme nul n'apparaît pas : « 60 = 60 » ou « ×(1 + 0%) » noient la
+      // ligne sans rien apprendre, et c'est elle qu'on compare au jeu.
       detail: `${base} × (100 + ${termes.join(" + ")})/100 = ${multiplie}`
             + (fixes ? ` + ${fixes} fixes` : "")
             + (opts.critical && casterStats.domCrit ? ` + ${casterStats.domCrit} crit.` : "")
-            + ` → ${bruts}, puis −${resPct}% ${resFixe ? `et −${resFixe} fixe ` : ""}→ ${finaux}`,
+            + (bruts !== multiplie ? ` = ${bruts}` : "")
+            + (pourcent ? ` ×(1 + ${pourcent}%) = ${totalise}` : "")
+            + `, puis −${resPct}% ${resFixe ? `et −${resFixe} fixe ` : ""}→ ${finaux}`,
     };
   }
 

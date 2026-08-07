@@ -191,7 +191,7 @@ const state = {
   entities: [], actifId: null, spellChoisi: null,
   // Grimoire : pour chaque groupe de variantes, le sort emporté.
   variantes: new Map(),
-  hoverCell: -1, level: 200,
+  hoverCell: -1, level: 200, round: 1,
   // Cases atteignables à la marche, recalculées à chaque rendu.
   atteignables: new Map(),
   hw: 22, hh: 11, dpr: 1,
@@ -421,7 +421,7 @@ function renderEntities() {
     carte.appendChild(body);
     box.appendChild(carte);
   }
-  $("turnInfo").textContent = `${actif().name} joue`;
+  $("turnInfo").textContent = `${actif().name} joue · tour ${state.round}`;
 }
 
 function niveauChoisi() {
@@ -605,24 +605,41 @@ cv.addEventListener("click", (ev) => {
 });
 
 $("btnTurn").addEventListener("click", () => {
-  const e = actif();
-  const expires = S.tickBuffs(e);
-  for (const b of expires) {
-    journalise([{ type: "info", texte: `${e.name} : ${b.label} expire.` }]);
+  const ordre = state.entities;
+  const suivantIdx = (ordre.findIndex((x) => x.id === state.actifId) + 1) % ordre.length;
+  state.actifId = ordre[suivantIdx].id;
+
+  // Une durée d'effet se compte en TOURS DE JEU, pas en tours du combattant
+  // qui la subit : « −3 PM pendant 1 tour » doit peser sur le tour que la
+  // cible s'apprête à jouer. Le compte n'avance donc que lorsque la main
+  // revient au premier combattant — un tour complet pour tout le monde.
+  if (suivantIdx === 0) {
+    state.round += 1;
+    journalise([{ type: "info", texte: `— Tour de jeu ${state.round} —` }]);
+    for (const ent of state.entities) {
+      for (const b of S.tickBuffs(ent)) {
+        journalise([{ type: "info", texte: `${ent.name} : ${b.label} expire.` }]);
+      }
+    }
   }
-  // On passe la main, puis on rend ses points au nouveau combattant.
-  state.actifId = state.entities.find((x) => x.id !== state.actifId).id;
+
+  // Régénération : elle part des caractéristiques EFFECTIVES, buffs compris.
+  // Repartir des statistiques de base rendrait ses PM à une cible qu'on vient
+  // d'amputer, ce qui annulait le malus au moment précis où il devait mordre.
   const suivant = actif();
-  suivant.pa = suivant.stats.pa || 6;
-  suivant.pm = suivant.stats.pm || 3;
+  const eff = S.effectiveStats(suivant);
+  suivant.pa = Math.max(0, eff.pa != null ? eff.pa : 6);
+  suivant.pm = Math.max(0, eff.pm != null ? eff.pm : 3);
+
   state.spellChoisi = null;
-  journalise([{ type: "tour", texte: `— Tour de ${suivant.name} —` }]);
+  journalise([{ type: "tour", texte: `— Tour de ${suivant.name} (${suivant.pa} PA, ${suivant.pm} PM) —` }]);
   render();
 });
 
 $("btnReset").addEventListener("click", () => {
   creerEntites();
   nouvelleCarte("1");
+  state.round = 1;
   $("log").textContent = "";
   render();
 });

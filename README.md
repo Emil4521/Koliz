@@ -128,19 +128,37 @@ de [nodejs.org](https://nodejs.org).
 
 ```
 base   = jet du sort
-bruts  = base × (1 + (caractéristique + puissance + %dommages) / 100)
+bruts  = base × (100 + caractéristique de l'élément + puissance) / 100
          + dommages fixes de l'élément + dommages fixes génériques
          [+ dommages critiques si le coup est critique]
-finaux = bruts × (1 − résistance% cible / 100) − résistance fixe cible
+total  = bruts × (1 + % dommages)
+finaux = total × (1 − résistance% cible / 100) − résistance fixe cible
 ```
 
 Arrondi à l'entier inférieur à chaque étape, jamais négatif. Chaque élément
 puise dans sa caractéristique — Terre/Force, Feu/Intelligence, Eau/Chance,
 Air/Agilité, Neutre/Force.
 
+Le **% Dommages n'entre pas** dans la parenthèse de la caractéristique : il
+multiplie le total, dommages fixes compris. La différence n'a rien de
+cosmétique — 10 de base avec 50 force, 30 puissance et 20 % dommages donnent
+21 ainsi, contre 20 si le pourcentage rejoignait la caractéristique.
+
 **À confirmer contre le jeu** : l'ordre exact des arrondis, et le fait que les
 dommages critiques s'ajoutent aux dégâts bruts *avant* l'application des
 résistances.
+
+### Une durée se compte en tours de jeu
+
+« −3 PM pendant 1 tour » désigne un **tour de jeu complet**, pas le tour du
+combattant qui subit l'effet. Deux conséquences dans le moteur :
+
+- Les durées ne sont décrémentées que lorsque la main revient au premier
+  combattant, pas à la fin du tour de chacun.
+- La régénération de début de tour part des caractéristiques **effectives**,
+  buffs compris. Repartir des statistiques de base rendait ses PM à une cible
+  qu'on venait d'amputer — le malus était annulé au moment précis où il
+  devait mordre.
 
 ### Classification des effets de sort
 
